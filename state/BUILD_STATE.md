@@ -24,10 +24,10 @@ W4-ESC-* and FIX-* rows are appended when created.
 | ID | Wave | Type | Deps | Status | Attempts | Branch @ SHA | Merged | Notes |
 |---|---|---|---|---|---|---|---|---|
 | P0-REPO | 0 | impl | — | FIXING | 1 | wp/P0-REPO @ 257ef54 | | r1 CHANGES_REQUIRED (4 MAJOR); fix round 1 |
-| P0-TOOLCHAIN | 0 | impl | — | FIXING | 1 | wp/P0-TOOLCHAIN @ 9d320f3 | | r1 CHANGES_REQUIRED (1 MAJOR: EH under Wine); fix round 1 |
-| P0-HARNESS | 0 | impl | — | RUNNING | 1 | | | |
-| P0-DATATOOLS | 0 | impl | — | FIXING | 1 | wp/P0-DATATOOLS @ 1a99d13 | | r1 CHANGES_REQUIRED (3 MAJOR); fix round 1 |
-| P0-SIDECAR | 0 | impl | — | FIXING | 1 | wp/P0-SIDECAR @ cf21a75 | | r1 CHANGES_REQUIRED (1 MAJOR ipc pause lifecycle); fix round 1 |
+| P0-TOOLCHAIN | 0 | impl | — | FIXING (checkpoint) | 1 | wp/P0-TOOLCHAIN @ ad47bb5 | | r1 fix round 1 mostly done: EH (c) fixed by -mstackrealign, (a)/(b) coding rules ABI.md §6, 27-case EH probe; remaining: re-run ci.d 20/50, README, PINS (FLUF URLs, redist pin), final acceptance + fix report; OPEN Q: app-local native MSVC runtime for FLUF (Track A) |
+| P0-HARNESS | 0 | impl | — | RUNNING (checkpoint, PARTIAL a1) | 1 | wp/P0-HARNESS @ a5bafe5 | | report state/reports/P0-HARNESS-a1.md; RESUME POINT at top of harness/NOTES.md; first after reboot: Track A DXVK boot + dacom stricmp crash triage, concurrency, spew allow-lists, vdesk input gate |
+| P0-DATATOOLS | 0 | impl | — | FIXING (checkpoint) | 1 | wp/P0-DATATOOLS @ 463eb68 | | r1 fix round 1 ~half done (MAJOR1 done; MAJOR2/3 code done, tests missing; hygiene+validator MINORs not started); RESUME POINT in tools/fltools/NOTES.md |
+| P0-SIDECAR | 0 | impl | — | FIXING (checkpoint) | 1 | wp/P0-SIDECAR @ dbc1c9f | | r1 fix round 1 partly done; RESUME POINT in sidecar/NOTES.md (tests for pause/late-ack/ptt-cancel/ports/brain/critical_hull, README port, CUDA smoke re-run) |
 | P0-TRACK-A | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | P0-TRACK-B | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | S-BASE | 0 | spike | G0a, P0-DATATOOLS | TODO | 0 | | | |
