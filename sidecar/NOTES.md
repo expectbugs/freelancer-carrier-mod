@@ -155,6 +155,8 @@ Measured for the 5-word phrase in voice `am_michael` while game lanes were runni
 | `20261018T050200Z-sidecar-ss` | `ss -ltnp`: `127.0.0.1:29170` only; no IPv6 listener; SIGTERM exit 0; no listener after |
 | flood (scratch script) | 20 000 `ev.hit` + `state` lines pushed back to back: all 20 021 lines processed, 0 invalid; the first `pong` after the burst took 184 ms (backlog), then median 0.06 ms. Planned load is ≤ 50 msg/s. |
 | `20261018T051000Z-…-x20`, `20261018T053000Z-…-x20` | full suite 20× each, 0 failures (TESTING §Layers flakiness rule) |
+| `20261018T060000Z-sidecar-pytest-x20` | after the review fixes: 253 tests × 20 runs, 0 failures |
+| `20261018T061000Z-sidecar-selftest`, `20261018T061100Z-sidecar-ss`, `20261018T061200Z-voice-smoke-netns` | final code: selftest ok on 29170; `127.0.0.1:29170` only, no IPv6, SIGTERM exit 0; offline voice smoke ok (stt_ms 121, tts_first_audio_ms 387, cuda/float16) |
 | `20261018T050300Z-sidecar-mic-discovery` | `mic: resolved index=63 matches=1` (name in the local log only) |
 
 ### Open items for later packages
