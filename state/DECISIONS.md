@@ -159,3 +159,13 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
 - **Choice:** (b). P0-DATATOOLS adds the `harness.*` preservation (with tests) now, before its round-2 review. The harness switches `deploy.py` to the patch unit after both packages are merged (P0-HARNESS fix round, or W1-HARNESS if HARNESS has already merged).
 - **Why:** one writer of record per file; reversible undeploy stays exact.
 - **Decided by:** orchestrator
+
+## D108 — 2026-10-18 — Public checker: authored-data escape for R5, word-bounded blocklist entries, api_key in assignment form
+- **Context:** P0-REPO review r2. R5 (bulk FL data) blocks our own authored data that legitimately uses FL-native key names (`fcm.world.v1` world.json fixtures with `ids_name`/`dock_with`; NPC definitions with `ship_archetype`/`state_graph`/`npc_class`; carrier YAML with `hit_pts`/`nanobot_limit`). D102 assumed our YAML would avoid such keys, but our own schemas use them. Also: the 6-character tailnet-host blocklist entry is a substring of ordinary words; `api_key` inside any identifier (e.g. a test name) is flagged as a credential.
+- **Options (R5):** rename every key in our schemas away from FL names (fights the data model and the generators); loosen R5 globally (reopens the r1 leak); a reviewable per-file escape header.
+- **Choice:**
+  - R5 escape: a file whose first 5 lines contain `check_public: authored-data <reason>` gets R5 reported as a WARNING instead of a violation, only under `data/`, `tests/`, `harness/`, `gen/`, `docs/spec/` and `src/**/tests/`. It never overrides R1, R2, R4 or R7. CONVENTIONS §12 is amended after the P0-REPO merge to require the header (with a one-line reason) on authored files that use FL-native keys in bulk, and reviewers check the reason.
+  - Blocklist entries prefixed `w:` match as whole words (case-insensitive, word boundaries; also in paths and in UTF-8/UTF-16LE binary content). The short tailnet-host entry becomes a `w:` entry.
+  - The `api_key` credential marker matches assignment/value form only (`api_key = …`, `"api_key": …`, `api_key: …`, `API_KEY=…`), not any identifier containing it. Real secret shapes are still matched everywhere.
+- **Why:** keeps the strong r1 gate on pasted game data while letting honest packages commit their own schemas; every escape is visible in review and in `git grep`.
+- **Decided by:** orchestrator
