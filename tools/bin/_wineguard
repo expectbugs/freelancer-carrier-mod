@@ -1,0 +1,22 @@
+#!/bin/bash
+# Wine guard (docs/plan/CONVENTIONS.md §15). Every wine tool on PATH resolves here.
+# Refuses unless WINEPREFIX resolves to one of the build's own prefixes; never Adam's play prefix or ~/.wine.
+name="$(basename "$0")"
+WBIN=/usr/lib/wine-proton-11.0.1/bin
+raw="${WINEPREFIX:-}"
+p="$( [ -n "$raw" ] && realpath -m -- "$raw" )"
+case "$p" in
+  /home/user/freelancer/prefix-dev*|/home/user/freelancer/prefix-lane*|/home/user/freelancer/prefix-carrier*) ;;
+  *) echo "wine-guard: REFUSED '$name' — WINEPREFIX='${raw:-<unset>}' (resolved '${p:-<none>}') is not a build prefix (prefix-dev*, prefix-lane*, prefix-carrier*)." >&2
+     exit 97 ;;
+esac
+if [ ! -d "$p" ]; then
+  echo "wine-guard: REFUSED '$name' — $p does not exist. Create build prefixes by reflink-cloning the play prefix (cp -a --reflink=always), not by running wine in an empty dir." >&2
+  exit 97
+fi
+export WINEPREFIX="$p"
+case "$name" in
+  wine-proton) exec "$WBIN/wine" "$@" ;;
+  winetricks)  export WINE="$WBIN/wine" WINESERVER="$WBIN/wineserver"; exec /usr/bin/winetricks "$@" ;;
+  *)           exec "$WBIN/$name" "$@" ;;
+esac

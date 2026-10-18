@@ -1,0 +1,32 @@
+# Personal / research / reference material — never public
+/local/
+# Build outputs and fetched vendor trees
+/build/
+/out/
+/vendor/
+*.obj
+*.pdb
+*.ilk
+# Generated overlays (derived from local game data — never commit)
+/gen/out/
+/overlay/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Harness run artifacts
+/harness/runs/
+/testruns/
+# Stop file for the autonomous build
+/STOP
+# Agent worktrees created by Claude Code
+/.claude/worktrees/
+# Safety nets (CONVENTIONS §5, §12, §13)
+/harness/out/
+/sidecar/models/
+/sidecar/data/
+/sidecar/logs/
+*.onnx
+*.carrier.json
+*.fl

@@ -1,0 +1,1 @@
+Watchdog nudge: the build heartbeat is stale. Refresh the heartbeat file, re-read the build ledger, check running agents and lanes, then continue the build per AUTONOMY section 5.
