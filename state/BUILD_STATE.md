@@ -3,19 +3,27 @@ BUILD_STATUS: IN_PROGRESS
 
 # Build ledger (orchestrator-owned; update after every state change, commit at least per merge/gate)
 
-- **Current phase:** Phase 0 — foundation packages running
+- **Current phase:** Phase 0 — foundation packages checkpointed for the GPU-reset reboot (resume per Next actions)
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
-- **Lanes:** created by P0-HARNESS (lane-1,2,6,7,8 exist). **GPU: Vulkan dead since 2026-10-18 00:28 (Xid 51→154; D103) — needs Adam reboot/GPU reset; lanes use wined3d fallback; re-run DXVK items after reset.**
-- **Last update:** 2026-10-18T00:27 (P0: REPO+TOOLCHAIN fixing, DATATOOLS+SIDECAR in review, HARNESS running)
+- **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-1/2 disposable; lane-6/7/8 leftovers). **GPU faulted at 2026-10-18 00:28 (D103); Adam is rebooting about 01:00 to reset it.** After the reboot, verify Vulkan works (Next actions 0).
+- **Last update:** 2026-10-18T01:00 (all P0 agents checkpointed; reboot pending)
 
 ## Next actions
-1. ~~Env guards, manifest, venv, brain cwd, display-awake, IN_PROGRESS~~ (done 2026-10-17T23:08; manifest 8770 entries).
-2. P0 foundation agents RUNNING (see Agents running). As each reports: save report to `state/reports/<ID>-a1.md`, spawn reviewer, fix loop, merge, `harness/ci.sh`, push (after P0-REPO merged and checker passes on full history).
-3. After P0-REPO merges: `git push origin main` (first push — run `tools/check_public.py --tree .` first); check the first Actions run.
-4. When P0-TOOLCHAIN and P0-HARNESS are merged: brief + spawn P0-TRACK-A and P0-TRACK-B in parallel.
-5. **GPU (D103):** each turn, check `timeout 20 vulkaninfo --summary` (exit 0, no vkCreateDevice failure) → if Vulkan is back, tell lanes to switch to DXVK and re-run every DXVK-pending item.
-6. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
+**RESUME AFTER THE GPU-RESET REBOOT (2026-10-18 ~01:00; Adam rebooted on purpose; see D103–D105).** Every agent was told to stop at a clean checkpoint before the reboot. No agent from the previous session survives. Each FIXING/RUNNING package is interrupted: continue it with a FRESH agent (attempt 1 continued; the fix-round count carries over).
+0. `date -Is > local/heartbeat`; `tools/display-awake.sh start`. The GPU should be healthy again: check `timeout 20 vulkaninfo --summary` (no `vkCreateDevice failed`) and `nvidia-smi -q | grep 'Recovery Action'` (None). If Vulkan works, lanes use DXVK (`FLMOD_RENDERER=auto`), and `LANES` can go back above 2 once concurrency is proven. If it's still faulted, record that in the ledger, continue on wined3d-sw, and tell Adam.
+1. Remove the stale agent worktrees so the branches can be checked out again: for each `.claude/worktrees/agent-*`, check `git -C <wt> status --short` is empty (all were clean at checkpoint), then `git worktree remove <wt>`; then `git worktree prune`. Never delete a dirty worktree — commit its contents to its branch first. The branches `wp/P0-*` and the reports in `state/reports/` hold everything.
+2. Re-brief one fresh agent per package. Brief = the original `state/briefs/<ID>.md` plus a resume addendum: "continue from branch wp/<ID> at <sha>; read the RESUME POINT in <NOTES path> first; the review findings are in state/reports/<ID>-r1.md; finish fix round 1, then report with a short fix report (what changed per finding, tests, evidence, SHA)":
+   - **P0-REPO** @ wp/P0-REPO (latest; the agent may report a checkpoint SHA) — fix round 1 of r1 (state/reports/P0-REPO-r1.md). RESUME POINT in harness/ci.d/NOTES-P0-REPO.md or tools notes (see the agent's checkpoint report in the ledger row).
+   - **P0-TOOLCHAIN** @ ad47bb5 — RESUME POINT at the end of toolchain/NOTES.md. Remaining: re-run ci.d 20/50 plus the stale-binary test, README, PINS (FLUF URLs, redist pin), final load-proof + EH probe on both tracks, fix report. Open question for G0a/W1-PLATFORM: app-local native MSVC runtime for FLUF (Track A).
+   - **P0-HARNESS** @ a5bafe5 (attempt-1 PARTIAL report: state/reports/P0-HARNESS-a1.md) — RESUME POINT at the top of harness/NOTES.md. Do first on DXVK: Track A boot (x11 + vdesk), dacom.dll stricmp crash triage (N7), concurrency at 2 and then 3–4 lanes; then spew allow-lists per track/renderer, A fixture validity, lvl1_rich_fp9, vdesk input gate, README, selftest.sh, check_public. prefix-lane-6/7/8 are leftovers and may be deleted.
+   - **P0-DATATOOLS** @ 463eb68 — RESUME POINT in tools/fltools/NOTES.md. Remaining: tests for MAJOR 2/3 and the MINORs, the data-hygiene and validator-severity MINORs, report text, the marker-clash proposal.
+   - **P0-SIDECAR** @ dbc1c9f — RESUME POINT in sidecar/NOTES.md. Remaining: tests (pause, late ack, ptt cancel, send timeout, ids, ports, brain, voice_smoke mocked, critical_hull clamp), README port, CUDA `voice_smoke --require-cuda` re-run on the healthy GPU, 20× suite, check_public, fix report.
+3. After each fix report: save it to `state/reports/<ID>-f1.md`, then spawn a round-2 reviewer (`state/briefs/<ID>-r2.md` from REVIEWER_BRIEF_TEMPLATE; include the r1 findings and the f1 report). P0-HARNESS gets its first review once it reports DONE.
+4. Merge order once each reviewer PASSes: P0-REPO first (it brings the hooks and checker; then `git push origin main` after `tools/check_public.py --tree .` and `--commits` on the whole history; check the first Actions run), then the others. Run `python3 -I tools/check_public.py --commits=main..wp/<ID>` before every merge, then `harness/ci.sh` after it.
+5. When P0-TOOLCHAIN and P0-HARNESS are merged: brief and spawn P0-TRACK-A and P0-TRACK-B in parallel.
+6. **GPU (D103):** while the GPU is faulted, check each turn whether Vulkan is back.
+7. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
 
 ## Package ledger
 Status values: TODO, READY, BRIEFED, RUNNING, REVIEW, FIXING, MERGED, DEGRADED, BLOCKED, SKIPPED.
@@ -84,17 +92,10 @@ W4-ESC-* and FIX-* rows are appended when created.
 | F | PENDING | |
 
 ## Agents running
+None. All agents from session 1 were stopped at clean checkpoints for the 2026-10-18 01:00 reboot. Their former ids (af7c7d7d P0-REPO, afd32a81 TOOLCHAIN, a55157d6 HARNESS, a446e058 DATATOOLS, a5795216 SIDECAR, plus reviewers a6d079bb, aa8f1e46, a3d414fa, a1877e17) are unreachable after the reboot.
+
 | Agent name/id | Package | Role (impl/review) | Started | Notes |
 |---|---|---|---|---|
-| af7c7d7da0b0d74b7 | P0-REPO | impl | 2026-10-17T23:11 | attempt 1 reported DONE 00:05; idle, resumable for fixes |
-| a6d079bb31f368f5b | P0-REPO | review r1 | 2026-10-18T00:07 | done: CHANGES_REQUIRED |
-| afd32a815c13c9fe1 | P0-TOOLCHAIN | impl | 2026-10-17T23:11 | attempt 1 reported DONE 00:13; idle, resumable |
-| aa8f1e4667ecb98c8 | P0-TOOLCHAIN | review r1 | 2026-10-18T00:14 | done: CHANGES_REQUIRED |
-| a55157d6f12dd6759 | P0-HARNESS | impl | 2026-10-17T23:11 | attempt 1 |
-| a446e0585bf801c32 | P0-DATATOOLS | impl | 2026-10-17T23:11 | attempt 1 reported DONE ~00:23; idle |
-| a3d414faf5f1ca52a | P0-DATATOOLS | review r1 | 2026-10-18T00:25 | done: CHANGES_REQUIRED |
-| a5795216824605bda | P0-SIDECAR | impl | 2026-10-17T23:11 | attempt 1 reported DONE ~00:25; idle |
-| a1877e1749d92c531 | P0-SIDECAR | review r1 | 2026-10-18T00:27 | done: CHANGES_REQUIRED |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
