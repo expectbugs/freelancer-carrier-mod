@@ -3,11 +3,11 @@ BUILD_STATUS: IN_PROGRESS
 
 # Build ledger (orchestrator-owned; update after every state change, commit at least per merge/gate)
 
-- **Current phase:** Phase 0 (not started)
+- **Current phase:** Phase 0 — foundation packages running
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** not yet created (P0-HARNESS)
-- **Last update:** 2026-10-17 (plan authored; build not started)
+- **Last update:** 2026-10-17T23:10 (P0 foundation spawned)
 
 ## Next actions
 1. `source tools/env.sh`; confirm the wine guards refuse an unset prefix (`wine --version` must exit 97). Make sure no wine process uses the play prefix (`pgrep -af 'freelancer/prefix/'`), then run `tools/play_prefix_manifest.sh capture` (read-only; proves later that the play install was never touched).
@@ -24,11 +24,11 @@ W4-ESC-* and FIX-* rows are appended when created.
 
 | ID | Wave | Type | Deps | Status | Attempts | Branch @ SHA | Merged | Notes |
 |---|---|---|---|---|---|---|---|---|
-| P0-REPO | 0 | impl | — | TODO | 0 | | | |
-| P0-TOOLCHAIN | 0 | impl | — | TODO | 0 | | | |
-| P0-HARNESS | 0 | impl | — | TODO | 0 | | | |
-| P0-DATATOOLS | 0 | impl | — | TODO | 0 | | | |
-| P0-SIDECAR | 0 | impl | — | TODO | 0 | | | |
+| P0-REPO | 0 | impl | — | RUNNING | 1 | | | |
+| P0-TOOLCHAIN | 0 | impl | — | RUNNING | 1 | | | |
+| P0-HARNESS | 0 | impl | — | RUNNING | 1 | | | |
+| P0-DATATOOLS | 0 | impl | — | RUNNING | 1 | | | |
+| P0-SIDECAR | 0 | impl | — | RUNNING | 1 | | | |
 | P0-TRACK-A | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | P0-TRACK-B | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | S-BASE | 0 | spike | G0a, P0-DATATOOLS | TODO | 0 | | | |
