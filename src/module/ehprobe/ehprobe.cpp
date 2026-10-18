@@ -15,6 +15,7 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 #define EHP extern "C" __declspec(dllexport)
@@ -475,6 +476,336 @@ EHP int ehp_json_at_wrapped()
     {
         return e.id;  // 401
     }
+}
+
+// ================================================================================================================
+// Hook-package patterns (review r2 F3, from the reviewer's probe): a fault inside the game's own Common.dll, nested
+// guards, __finally during unwinding, C++ EH on a worker thread, callbacks called by the VC6-era msvcrt.dll (the
+// runtime the engine uses), and C++ exceptions thrown the VC6 way. Plus the hook template of toolchain/ABI.md §6.7
+// (cases hook_template_*). A case returns -77 when a prerequisite is missing (ehprobe.sh reports SKIP).
+namespace {
+
+constexpr int kSkip = -77;
+
+// Like keep_regs, but returns fn()'s value when the caller's callee-saved registers survived, -1 otherwise.
+__declspec(noinline) int keep_regs_value(int (*fn)())
+{
+    volatile int seed = 1234;
+    int a = seed * 3, b = seed * 5, c = seed * 7, d = seed * 11;
+    const int r = fn();
+    const bool ok = (a == 3702 && b == 6170 && c == 8638 && d == 13574);
+    std::printf("keep_regs: fn=%d a=%d b=%d c=%d d=%d -> %s\n", r, a, b, c, d, ok ? "INTACT" : "CORRUPTED");
+    std::fflush(stdout);
+    return ok ? r : -1;
+}
+
+// The game's Common.dll, from the directory toolchain/ehprobe.sh passes in FLMOD_EHPROBE_GAME_EXE.
+HMODULE game_common_dll()
+{
+    char dir[MAX_PATH] = {};
+    const DWORD n = GetEnvironmentVariableA("FLMOD_EHPROBE_GAME_EXE", dir, sizeof(dir));
+    if (n == 0 || n >= sizeof(dir) - 16)
+        return nullptr;
+    const std::string path = std::string(dir) + "\\common.dll";
+    return LoadLibraryExA(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+}
+
+using CreateIdFn = unsigned int(__cdecl*)(const char*);   // CreateID(const char*), Common.dll
+using DeactivatePhysicsFn = void(__cdecl*)(void*);         // PhySys::DeactivatePhysics(CObject*), Common.dll
+DeactivatePhysicsFn g_deactivate = nullptr;
+
+void engine_fault_cb(void*) { g_deactivate(reinterpret_cast<void*>(0x10)); }  // faults inside Common.dll
+__declspec(noinline) int engine_fault_guarded()
+{
+    const unsigned long code = flmod_seh_guard(&engine_fault_cb, nullptr);
+    std::printf("engine fault: guard code=0x%08lX\n", code);
+    return code == EXCEPTION_ACCESS_VIOLATION ? 9 : 0;
+}
+
+void nested_cb(void* ctx) { *static_cast<unsigned long*>(ctx) = flmod_seh_guard(&av_cb, nullptr); }
+
+volatile int g_flag = 0;
+void finally_cb(void*)
+{
+    __try
+    {
+        *(volatile int*)nullptr = 3;
+    }
+    __finally
+    {
+        g_flag = 7;
+    }
+}
+
+DWORD WINAPI thread_proc(LPVOID p)
+{
+    try
+    {
+        throw std::runtime_error("thread");
+    }
+    catch (const std::exception& e)
+    {
+        *static_cast<int*>(p) = static_cast<int>(std::strlen(e.what()));  // 6
+    }
+    return 0;
+}
+
+using QsortFn = void(__cdecl*)(void*, size_t, size_t, int(__cdecl*)(const void*, const void*));
+QsortFn msvcrt_qsort()   // the VC6-era msvcrt.dll the engine links against (a Wine builtin here)
+{
+    HMODULE m = LoadLibraryA("msvcrt.dll");
+    return m ? reinterpret_cast<QsortFn>(reinterpret_cast<void*>(GetProcAddress(m, "qsort"))) : nullptr;
+}
+int __cdecl cmp_throw(const void*, const void*) { throw 5; }
+int __cdecl cmp_av(const void*, const void*) { return *(volatile int*)nullptr; }
+int __cdecl cmp_catch_inside(const void* a, const void* b)
+{
+    try
+    {
+        throw std::runtime_error("cb");
+    }
+    catch (...)
+    {
+        g_flag = g_flag + 1;
+    }
+    return *static_cast<const int*>(a) - *static_cast<const int*>(b);
+}
+void qsort_av_cb(void*)
+{
+    int v[4] = {4, 3, 2, 1};
+    msvcrt_qsort()(v, 4, sizeof(int), &cmp_av);
+}
+
+// A C++ exception thrown the VC6 way: msvcrt.dll!_CxxThrowException with a hand-built ThrowInfo for `int`.
+struct PMD { int mdisp, pdisp, vdisp; };
+struct CatchableType { unsigned properties; const void* pType; PMD thisDisplacement; int sizeOrOffset; void* copyFunction; };
+struct CatchableTypeArray { int n; const CatchableType* types[1]; };
+struct ThrowInfo { unsigned attributes; void* pmfnUnwind; void* pForwardCompat; const CatchableTypeArray* pCTA; };
+const CatchableType g_ct_int{1u, &typeid(int), {0, -1, 0}, static_cast<int>(sizeof(int)), nullptr};
+const CatchableTypeArray g_cta_int{1, {&g_ct_int}};
+const ThrowInfo g_ti_int{0, nullptr, nullptr, &g_cta_int};
+__declspec(noinline) void vc6_style_throw(int v)
+{
+    using CxxThrowFn = void(__stdcall*)(void*, const ThrowInfo*);
+    static int obj;
+    obj = v;
+    auto f = reinterpret_cast<CxxThrowFn>(
+        reinterpret_cast<void*>(GetProcAddress(LoadLibraryA("msvcrt.dll"), "_CxxThrowException")));
+    if (f)
+        f(&obj, &g_ti_int);
+}
+
+// ---- the hook template (toolchain/ABI.md §6.7), as documented apart from logging -------------------------------
+enum class HookStatus : int { ok, cxx_exception, unknown_exception };
+
+struct FooCall  // trivially destructible: it lives in the hook's frame across the guard
+{
+    int arg;
+    int result;
+    HookStatus status;
+    char what[96];
+};
+
+__declspec(noinline) int foo_work(int arg)  // the hook's real work: ordinary C++
+{
+    if (arg == 1)
+        throw std::runtime_error("bad arg");
+    if (arg == 3)
+        g_av_fp();  // probe only: a fault inside an opaque call
+    return 42;
+}
+
+void foo_body(void* p)  // runs under flmod_seh_guard; nothing may escape it
+{
+    auto& c = *static_cast<FooCall*>(p);
+    try
+    {
+        if (c.arg == 2)
+            *(volatile int*)nullptr = 1;  // probe only: a fault in the body's own code
+        c.result = foo_work(c.arg);
+        c.status = HookStatus::ok;
+    }
+    catch (const std::exception& e)
+    {
+        c.status = HookStatus::cxx_exception;
+        strncpy_s(c.what, e.what(), _TRUNCATE);
+    }
+    catch (...)
+    {
+        // A non-std C++ exception, or an SEH fault raised inside an opaque call (/EHa; ABI.md §6.2).
+        c.status = HookStatus::unknown_exception;
+    }
+}
+
+struct HookReport
+{
+    bool hit;
+    unsigned long code;
+    HookStatus status;
+    char what[96];
+};
+HookReport g_report{};
+void report_hook_failure(const char*, unsigned long code, const FooCall& c)  // stands in for the logger
+{
+    g_report.hit = true;
+    g_report.code = code;
+    g_report.status = c.status;
+    strncpy_s(g_report.what, c.what, _TRUNCATE);
+}
+
+__declspec(noinline) int __stdcall hook_foo(int arg)  // what the engine (or FLUF) calls
+{
+    FooCall c{arg, 0, HookStatus::ok, {}};
+    const unsigned long code = flmod_seh_guard(&foo_body, &c);  // a fault in foo_body's own code lands here
+    if (code == 0 && c.status == HookStatus::ok)
+        return c.result;
+    try
+    {
+        report_hook_failure("foo", code, c);
+    }
+    catch (...)
+    {
+        // reporting must never throw into the engine
+    }
+    return -1;  // the fallback (a real hook calls the original function here)
+}
+
+int g_hook_arg = 0;
+int call_hook() { return hook_foo(g_hook_arg); }
+
+// Runs hook_foo(arg) between register checks. Returns the hook's result, or -100 when registers were corrupted.
+int run_hook(int arg)
+{
+    g_report = HookReport{};
+    g_hook_arg = arg;
+    const int r = keep_regs_value(&call_hook);
+    std::printf("hook_foo(%d) -> %d; report hit=%d code=0x%08lX status=%d what='%s'\n", arg, r, g_report.hit ? 1 : 0,
+                g_report.code, static_cast<int>(g_report.status), g_report.what);
+    std::fflush(stdout);
+    return r;
+}
+
+}  // namespace
+
+EHP int ehp_hook_engine_fault_guarded_regs()
+{
+    HMODULE common = game_common_dll();
+    if (!common)
+        return kSkip;
+    auto create_id = reinterpret_cast<CreateIdFn>(reinterpret_cast<void*>(GetProcAddress(common, "?CreateID@@YAIPBD@Z")));
+    g_deactivate = reinterpret_cast<DeactivatePhysicsFn>(
+        reinterpret_cast<void*>(GetProcAddress(common, "?DeactivatePhysics@PhySys@@YAXPAUCObject@@@Z")));
+    if (!create_id || !g_deactivate)
+        return -2;
+    std::printf("Common.dll CreateID(\"li02\")=%u\n", create_id("li02"));
+    return keep_regs_value(&engine_fault_guarded);  // 9: AV inside Common.dll caught, registers intact
+}
+EHP int ehp_hook_nested_guards()
+{
+    unsigned long inner = 0;
+    const unsigned long outer = flmod_seh_guard(&nested_cb, &inner);
+    return (outer == 0 && inner == EXCEPTION_ACCESS_VIOLATION) ? 1 : 0;  // 1
+}
+EHP int ehp_hook_finally_runs()
+{
+    g_flag = 0;
+    const unsigned long code = flmod_seh_guard(&finally_cb, nullptr);
+    return (code == EXCEPTION_ACCESS_VIOLATION ? 10 : 0) + g_flag;  // 17
+}
+EHP int ehp_hook_thread_eh()
+{
+    int out = 0;
+    HANDLE h = CreateThread(nullptr, 0, &thread_proc, &out, 0, nullptr);
+    if (!h)
+        return -1;
+    WaitForSingleObject(h, 10000);
+    CloseHandle(h);
+    return out;  // 6
+}
+EHP int ehp_hook_cxx_through_msvcrt_qsort()
+{
+    QsortFn q = msvcrt_qsort();
+    if (!q)
+        return kSkip;
+    int v[4] = {4, 3, 2, 1};
+    try
+    {
+        q(v, 4, sizeof(int), &cmp_throw);
+    }
+    catch (int x)
+    {
+        return x;  // 5
+    }
+    return 0;
+}
+EHP int ehp_hook_av_through_msvcrt_qsort_guarded()
+{
+    if (!msvcrt_qsort())
+        return kSkip;
+    return flmod_seh_guard(&qsort_av_cb, nullptr) == EXCEPTION_ACCESS_VIOLATION ? 1 : 0;  // 1
+}
+EHP int ehp_hook_catch_inside_foreign_callback()
+{
+    QsortFn q = msvcrt_qsort();
+    if (!q)
+        return kSkip;
+    g_flag = 0;
+    int v[4] = {4, 3, 2, 1};
+    q(v, 4, sizeof(int), &cmp_catch_inside);
+    return (v[0] == 1 && v[3] == 4 && g_flag > 0) ? 1 : 0;  // 1
+}
+EHP int ehp_hook_catch_vc6_thrown_int()
+{
+    try
+    {
+        vc6_style_throw(21);
+    }
+    catch (int v)
+    {
+        return v;  // 21
+    }
+    return 0;
+}
+EHP int ehp_hook_catchall_vc6_thrown()
+{
+    try
+    {
+        vc6_style_throw(1);
+    }
+    catch (...)
+    {
+        return 22;  // 22
+    }
+    return 0;
+}
+
+// The hook template: every path returns normally to the "engine" with its registers intact.
+EHP int ehp_hook_template_ok()
+{
+    const int r = run_hook(0);
+    return (r == 42 && !g_report.hit) ? 1 : 0;  // 1
+}
+EHP int ehp_hook_template_cxx()
+{
+    const int r = run_hook(1);
+    const bool ok = r == -1 && g_report.hit && g_report.code == 0 && g_report.status == HookStatus::cxx_exception &&
+                    std::strcmp(g_report.what, "bad arg") == 0;
+    return ok ? 2 : 0;  // 2
+}
+// A fault may reach the guard (SEH code) or, under /EHa, the body's catch(...) ("possibly SEH"); both are handled.
+EHP int ehp_hook_template_av_body()
+{
+    const int r = run_hook(2);
+    const bool ok = r == -1 && g_report.hit &&
+                    (g_report.code == EXCEPTION_ACCESS_VIOLATION || g_report.status == HookStatus::unknown_exception);
+    return ok ? 3 : 0;  // 3
+}
+EHP int ehp_hook_template_av_opaque()
+{
+    const int r = run_hook(3);
+    const bool ok = r == -1 && g_report.hit &&
+                    (g_report.code == EXCEPTION_ACCESS_VIOLATION || g_report.status == HookStatus::unknown_exception);
+    return ok ? 4 : 0;  // 4
 }
 
 #ifdef EHPROBE_EXE

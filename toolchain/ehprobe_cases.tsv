@@ -4,6 +4,7 @@
 #   builtin  expectation with Wine's builtin vcruntime140/msvcp140 (the default runtime): pass | broken
 #   native   expectation with MSVC's 14.51 vcruntime140/msvcp140 app-local (WINEDLLOVERRIDES=n,b): pass | broken
 # Status: expectation pass + works = PASS; pass + not = FAIL; broken + not = KNOWN-BROKEN; broken + works = PASS (unexpected).
+# A case that returns -77 lacks a prerequisite (e.g. no game EXE dir with Common.dll in the prefix): status SKIP.
 ehp_base_throw_int	base	8	pass	pass	plain throw/catch
 ehp_base_std_exception	base	3	pass	pass	std::exception by const ref
 ehp_base_cross_frame	base	4	pass	pass	throw in a noinline callee
@@ -31,3 +32,16 @@ ehp_json_parse_no_exceptions	parse	1	pass	pass	parse(..., nullptr, false) return
 ehp_json_type_error	parse	302	pass	pass	get<int>() on a string throws type_error 302
 ehp_json_at_same_frame	parse	401	pass	pass	array at(): nlohmann catches std::out_of_range and throws json::out_of_range
 ehp_json_at_wrapped	parse	401	pass	pass	same, through a noinline wrapper
+ehp_hook_engine_fault_guarded_regs	hook	9	pass	pass	AV inside the game's Common.dll (PhySys::DeactivatePhysics(0x10)) caught by flmod_seh_guard, registers intact; SKIP without the game dir
+ehp_hook_nested_guards	hook	1	pass	pass	flmod_seh_guard nested inside another guard's callback
+ehp_hook_finally_runs	hook	17	pass	pass	__finally runs while a fault unwinds to an outer guard
+ehp_hook_thread_eh	hook	6	pass	pass	C++ throw/catch on a worker thread
+ehp_hook_cxx_through_msvcrt_qsort	hook	5	pass	pass	C++ exception from our callback crosses msvcrt.dll (VC6 runtime) qsort frames to our catch
+ehp_hook_av_through_msvcrt_qsort_guarded	hook	1	pass	pass	AV in our callback under msvcrt.dll qsort, caught by an outer flmod_seh_guard
+ehp_hook_catch_inside_foreign_callback	hook	1	pass	pass	try/catch entirely inside a callback called by msvcrt.dll qsort
+ehp_hook_catch_vc6_thrown_int	hook	21	pass	pass	exception thrown by msvcrt.dll!_CxxThrowException (VC6 style) caught by catch(int)
+ehp_hook_catchall_vc6_thrown	hook	22	pass	pass	same, caught by catch(...)
+ehp_hook_template_ok	hook	1	pass	pass	ABI.md §6.7 hook template: normal path returns the result, no report, registers intact
+ehp_hook_template_cxx	hook	2	pass	pass	hook template: std::exception in the work is reported with its message, fallback returned
+ehp_hook_template_av_body	hook	3	pass	pass	hook template: AV in the body's own code reported (guard code or catch(...) possibly SEH), fallback
+ehp_hook_template_av_opaque	hook	4	pass	pass	hook template: AV inside an opaque call reported (catch(...) possibly SEH or guard code), fallback

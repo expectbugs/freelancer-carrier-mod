@@ -1,7 +1,8 @@
 # tests/host/LogicHeaderCheck.cmake (included by the root CMakeLists.txt in host builds).
 #
-# Standalone-header test: every src/logic header must compile on its own on Linux with only src/ and
-# nlohmann/json on the include path: no <windows.h>, no FLSDK, no FLUF. Each header is included twice
+# Standalone-header test: every src/logic header (outside tests/ dirs, cmake/LogicLintFiles.cmake) must compile on
+# its own on Linux with only src/ and nlohmann/json on the include path: no <windows.h>, no FLSDK, no FLUF. Each
+# header is included twice
 # (include-guard check). Target logic_header_check is part of the default build; ctest
 # logic_headers_standalone rebuilds it so the result also shows up in the test report.
 #
@@ -61,3 +62,17 @@ add_test(NAME logic_rejects_forbidden_includes_lint
 add_test(NAME logic_include_lint_passes
   COMMAND "${CMAKE_COMMAND}" "-DFLMOD_LINT_DIR=${FLMOD_LOGIC_DIR}" "-DFLMOD_LINT_SRC_ROOT=${PROJECT_SOURCE_DIR}/src"
           -P "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake")
+
+# Positive fixture: a doctest file (and a doctest-including helper header) under src/logic/<area>/tests/ must
+# pass the lint and the header check and run in host_tests, on an incremental and on a fresh build of a scratch
+# copy of the tree (tests/host/LogicTestsDirFixture.cmake). The copy is configured with this option OFF, so the
+# fixture does not recurse.
+option(FLMOD_SELFTEST_FIXTURES "Host builds: register ctest fixtures that build scratch copies of the tree" ON)
+if(FLMOD_SELFTEST_FIXTURES)
+  add_test(NAME logic_tests_dir_doctest
+    COMMAND "${CMAKE_COMMAND}" "-DFLMOD_SRC=${PROJECT_SOURCE_DIR}"
+            "-DFLMOD_WORK=${CMAKE_BINARY_DIR}/fixtures/logic_tests_dir" "-DFLMOD_VENDOR=${FLMOD_VENDOR}"
+            "-DFLMOD_GENERATOR=${CMAKE_GENERATOR}" "-DFLMOD_MAKE=${CMAKE_MAKE_PROGRAM}"
+            -P "${PROJECT_SOURCE_DIR}/tests/host/LogicTestsDirFixture.cmake")
+  set_tests_properties(logic_tests_dir_doctest PROPERTIES TIMEOUT 600)
+endif()

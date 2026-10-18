@@ -123,7 +123,9 @@ see one raised inside an opaque call (`b_catchall_av_opaque_call`: PASS), which 
 callback can *also* swallow a crash and carry on in a corrupt state. Rules:
 
 - Use `flmod_seh_guard` (§6.1) for anything that may fault (engine pointers, patched memory, foreign callbacks).
-- Write `catch(...)` only for C++ exceptions, and log what it caught. Don't use it as a crash guard.
+- Write `catch(...)` only as the last handler of a C++ try, never as a crash guard. Because it may have swallowed a
+  fault, treat a `catch(...)` hit as "unknown exception, possibly SEH": log it as such, skip the rest of the work and
+  fall back. In hooks this is exactly the template in §6.7.
 
 ### 6.3 Exceptions leaving a catch block
 
@@ -141,8 +143,8 @@ the negative control in NOTES.md). Rules:
   `msgpack-c.lib`, `zstd_static.lib`) and HDE's DLLs. A catch-and-rethrow inside them can still crash under Wine's
   builtin CRT. Don't build control flow on exceptions passing through them.
 - No C++ exception may propagate into Freelancer (VC6) or FLUF frames. Every engine callback, hook and FLUF event
-  handler we implement catches everything at its own top level (`catch (const std::exception&)` + `catch (...)`),
-  logs, and returns normally.
+  handler we implement follows the hook template (§6.7): its work runs under `flmod_seh_guard`, catches
+  `const std::exception&` and `...` inside the guarded body, and the handler logs and returns normally.
 
 ### 6.4 Library code that rethrows internally
 
@@ -161,22 +163,121 @@ and are safe in code we compile; keep them away from prebuilt code's frames:
 
 ### 6.5 The EH probe (regression check)
 
-`toolchain/ehprobe.sh --build build/<win32 preset> (--prefix <prefix-dev*/prefix-lane*> | --clone <prefix-dev-name>)
-[--crt builtin|native|both]`. It runs every case of `ehprobe_cases.tsv` in its own `loadtest.exe` process and
-prints one line per case, `EHPROBE crt=… case=… group=a|b|c|parse|base|lib status=PASS|KNOWN-BROKEN|FAIL …`, plus a
-summary line, and writes `results.tsv`/`results.json`. Exit 0 = no FAIL, 1 = FAIL, 77 = prerequisites missing.
+`toolchain/ehprobe.sh --build build/<win32 preset> (--clone <prefix-dev-name> [--from prefix-dev-base-B|prefix-dev-base-A|play]
+| --prefix <prefix-dev-*>) [--crt builtin|native|both]`. It runs every case of `ehprobe_cases.tsv` in its own
+`loadtest.exe` process and prints one line per case, `EHPROBE crt=… case=… group=base|a|b|c|lib|parse|hook
+status=PASS|KNOWN-BROKEN|FAIL|SKIP …`, plus a summary line, and writes `results.tsv`/`results.json`. Exit 0 = no FAIL
+and every requested runtime ran; 1 = FAIL; 77 = a prerequisite or a requested runtime is missing (never a PASS with
+zero cases). `--prefix` takes only throwaway `prefix-dev-*` prefixes, never a baseline or a lane (a lane's
+wineserver may be running the game); `--clone` copies a dev baseline by default, so it never needs the play prefix.
 `toolchain/load_proof.sh` runs it after the CreateID proof. A FAIL means a working feature broke (or a flag went
 missing); an unexpected PASS of a KNOWN-BROKEN case means a rule above may be obsolete: update this section.
+
+Who runs it: not CI (it needs Wine). CI stage 10 statically checks the flags it depends on
+(`toolchain/check_flags.py`: `-mstackrealign`, `/EHa`, `/MD`, `_ITERATOR_DEBUG_LEVEL=0` on every TU). Proposed for the
+orchestrator: P0-TRACK-A/B and W1-PLATFORM acceptance run `ehprobe.sh --build build/win32-track<T> --clone … --crt
+both`, and so does any change to `toolchain/` or `cmake/` flags.
+
+The `hook` group covers what a game-hook package does (VERIFIED, both runtimes, both tracks): a fault inside the
+game's `Common.dll` caught by `flmod_seh_guard` with the caller's registers intact; nested guards; `__finally`
+running while a fault unwinds to an outer guard; C++ EH on a worker thread; a C++ exception or an AV leaving our
+callback through `msvcrt.dll`'s (VC6 runtime) `qsort` frames; a try/catch inside a callback that foreign code calls;
+a VC6-style `msvcrt!_CxxThrowException` caught by `catch(int)` and `catch(...)`; and every path of the §6.7 template.
 
 ### 6.6 Which msvcp140/vcruntime140 the game process gets
 
 - Default: **Wine's builtins**. They export every symbol our binaries and the whole FLUF nightly import
   (check_imports; `NOTES.md` "Question 3").
-- The play prefix and all its clones carry registry `DllOverrides` `msvcp140*`, `vcruntime140*`, `concrt140`,
-  `ucrtbase` = `native,builtin`. A native `vcruntime140.dll`/`msvcp140.dll` in the exe's directory therefore
+- The play prefix and all its clones (both dev baselines included) carry registry `DllOverrides` = `native,builtin`
+  for `msvcp140*`, `vcruntime140*`, `concrt140`, `ucrtbase`, the `api-ms-win-crt-*` sets and the older
+  `msvcp1?0`/`msvcr1?0` runtimes. A native `vcruntime140.dll`/`msvcp140.dll` in the exe's directory therefore
   replaces the builtins for **every** DLL in the process that imports them (FLUF, its modules, ours, and HDE's
-  FLHook, fmt, spdlog and pcre2 DLLs whenever they are loaded) without any environment variable. Only deploy them on purpose; the decision belongs to G0a/W1-PLATFORM.
+  FLHook, fmt, spdlog and pcre2 DLLs whenever they are loaded) without any environment variable. Only deploy them
+  on purpose; the decision belongs to G0a/W1-PLATFORM. A deploy step should refuse stray `msvcp1*`, `msvcr1*`,
+  `vcruntime140*`, `concrt140*`, `ucrtbase*` and `api-ms-win-crt-*` DLLs in the EXE dir.
 - Nothing in §6.1–6.4 may depend on which runtime is loaded: every rule holds under both (probe `--crt both`).
+
+### 6.7 The hook template (binding for every engine hook, callback and FLUF event handler)
+
+§6.1–6.3 together mean: the work runs under `flmod_seh_guard` (faults never escape, registers survive); the
+C++ `try` sits **inside** the guarded body (the guard also catches C++ exceptions, but only as code `0xE06D7363`,
+losing the message); a `catch(...)` hit is logged as "possibly SEH" (§6.2); and the handler always returns
+normally to the engine. Compiled and exercised in `src/module/ehprobe` (`hook_template_*` cases: normal path, a
+`std::exception`, an AV in the body's own code (reaches the guard), an AV inside an opaque call (reaches
+`catch(...)`); all PASS with registers intact under both runtimes).
+
+```cpp
+enum class HookStatus : int { ok, cxx_exception, unknown_exception };
+
+struct FooCall  // trivially destructible: it lives in the hook's frame across the guard
+{
+    int arg;          // the hook's inputs ...
+    int result;       // ... and outputs
+    HookStatus status;
+    char what[96];
+};
+
+void foo_body(void* p)  // runs under flmod_seh_guard; nothing may escape it
+{
+    auto& c = *static_cast<FooCall*>(p);
+    try
+    {
+        c.result = foo_work(c.arg);  // the real work: ordinary C++, may throw
+        c.status = HookStatus::ok;
+    }
+    catch (const std::exception& e)
+    {
+        c.status = HookStatus::cxx_exception;
+        strncpy_s(c.what, e.what(), _TRUNCATE);
+    }
+    catch (...)
+    {
+        // A non-std C++ exception, or an SEH fault raised inside an opaque call (/EHa; §6.2).
+        c.status = HookStatus::unknown_exception;
+    }
+}
+
+int __stdcall hook_foo(int arg)  // what the engine (or FLUF) calls
+{
+    FooCall c{arg, 0, HookStatus::ok, {}};
+    const unsigned long code = flmod_seh_guard(&foo_body, &c);  // a fault in foo_body's own code lands here
+    if (code == 0 && c.status == HookStatus::ok)
+        return c.result;
+    try
+    {
+        if (code != 0)
+            FLMOD_LOG_ERROR("hook foo: SEH exception 0x{:08X}; fell back", code);
+        else if (c.status == HookStatus::cxx_exception)
+            FLMOD_LOG_ERROR("hook foo: exception: {}; fell back", c.what);
+        else
+            FLMOD_LOG_ERROR("hook foo: unknown exception, possibly SEH (catch(...) under /EHa); fell back");
+    }
+    catch (...)
+    {
+        // reporting must never throw into the engine
+    }
+    return foo_fallback(arg);  // e.g. call the original function, or a safe default
+}
+```
+
+`FLMOD_LOG_ERROR` stands for the module logger (`[carrier] <subsystem>: …`, CLAUDE.md guardrail 8); ARCH-0 turns
+the guard and this shape into contract helpers. Keep `foo_work` free of `__try`; put engine-memory reads that may
+fault in their own `flmod_seh_guard` call if the hook must continue after them.
+
+### 6.8 Not covered by the probe (needs the game; items for P0-TRACK-A/B)
+
+`loadtest.exe` cannot reproduce these; check them in game and record the results as ENGINE_FACTS:
+
+- C++ exceptions crossing **FLUF.dll** frames (a FLUF event handler that throws; FLUF calling back into us inside its
+  own try). FLUF.dll is clang-cl code without `-mstackrealign` (`NOTES.md` "Question 3"), so §6.3 applies to it.
+- **Crash handlers** installed by others: HDE's crash catcher plugin, FLUF.CrashWalker, or any vectored exception
+  handler / `SetUnhandledExceptionFilter`. A first-chance VEH runs before our `__except` filter and could log, or
+  terminate on, a fault that `flmod_seh_guard` would have handled. Verify a guarded fault inside a hook is
+  survivable with the game's real handler chain.
+- Exceptions thrown during **DllMain** or static initialisation of our DLL as the game (dacom `[Libraries]` or FLUF)
+  loads it, and on unload at exit.
+- The §6.7 template on real engine hooks (calling conventions `__thiscall`/`__fastcall`, detours through MinHook or
+  FLUF's hooking), including a fault inside the original function called as the fallback.
 
 ## 7. Licensing of what ends up inside our binaries (for W5-SHIP)
 

@@ -8,7 +8,10 @@
 #   src/logic/**/*.cpp            -> static library `logic` (host and win32)
 #   tests/host/**/*.cpp,
 #   src/**/tests/**/*.cpp         -> `host_tests` (doctest, host builds only)
-#   src/game/** is NOT globbed here: the module target that ships it (ARCH-0, src/module/<mod>/) globs it.
+#   src/game/** (outside tests/) is NOT globbed here: the module target that ships it (ARCH-0,
+#                                    src/module/<mod>/) globs it and must exclude (^|/)(tests|scenarios)/
+#                                    (toolchain/README.md "The src/game rule")
+#   The src/logic include lint and header check skip tests/ dirs (cmake/LogicLintFiles.cmake).
 #   src/module/*/CMakeLists.txt,
 #   spikes/*/CMakeLists.txt,
 #   harness/devbridge/CMakeLists.txt  -> add_subdirectory (each guards itself with flmod_track_only /
@@ -78,14 +81,18 @@ add_library(logic STATIC ${FLMOD_LOGIC_SOURCES})
 target_include_directories(logic PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(logic PUBLIC flmod::nlohmann_json)
 
-file(GLOB_RECURSE FLMOD_LOGIC_HEADERS CONFIGURE_DEPENDS
-  "${FLMOD_LOGIC_DIR}/*.h" "${FLMOD_LOGIC_DIR}/*.hpp" "${FLMOD_LOGIC_DIR}/*.inl")
+# The lint's file set and the header-check set come from cmake/LogicLintFiles.cmake, the same function the lint
+# script uses, so the stamp depends on exactly the files the lint reads (tests/ dirs excluded in both).
+include(cmake/LogicLintFiles.cmake)
+flmod_logic_lint_files(FLMOD_LOGIC_LINT_FILES "${FLMOD_LOGIC_DIR}" CONFIGURE_DEPENDS)
+flmod_logic_lint_files(FLMOD_LOGIC_HEADERS "${FLMOD_LOGIC_DIR}" HEADERS_ONLY CONFIGURE_DEPENDS)
 add_custom_command(
   OUTPUT "${CMAKE_BINARY_DIR}/generated/logic_include_lint.stamp"
   COMMAND "${CMAKE_COMMAND}" "-DFLMOD_LINT_DIR=${FLMOD_LOGIC_DIR}" "-DFLMOD_LINT_SRC_ROOT=${PROJECT_SOURCE_DIR}/src"
           "-DFLMOD_LINT_STAMP=${CMAKE_BINARY_DIR}/generated/logic_include_lint.stamp"
           -P "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake"
-  DEPENDS ${FLMOD_LOGIC_SOURCES} ${FLMOD_LOGIC_HEADERS} "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake"
+  DEPENDS ${FLMOD_LOGIC_LINT_FILES} "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake"
+          "${PROJECT_SOURCE_DIR}/cmake/LogicLintFiles.cmake"
   COMMENT "Checking src/logic includes are engine-free"
   VERBATIM)
 add_custom_target(logic_include_lint DEPENDS "${CMAKE_BINARY_DIR}/generated/logic_include_lint.stamp")

@@ -7,6 +7,7 @@
 #          and <nlohmann/...> (the project's JSON library)
 #   "..."  a file that exists relative to the including file or to FLMOD_LINT_SRC_ROOT, and lies under
 #          src/logic/ or src/contracts/
+# Files under any tests/ directory are not linted (host-only doctest code; see cmake/LogicLintFiles.cmake).
 # The host header check (tests/host/LogicHeaderCheck.cmake) catches the same class of problem by compilation;
 # this lint also runs in win32 builds, where <windows.h> would otherwise compile fine.
 
@@ -33,9 +34,9 @@ set(_std_headers
   assert.h ctype.h errno.h fenv.h float.h inttypes.h limits.h locale.h math.h setjmp.h signal.h stdarg.h
   stddef.h stdint.h stdio.h stdlib.h string.h time.h uchar.h wchar.h wctype.h stdatomic.h)
 
-file(GLOB_RECURSE _files LIST_DIRECTORIES false
-  "${FLMOD_LINT_DIR}/*.h" "${FLMOD_LINT_DIR}/*.hpp" "${FLMOD_LINT_DIR}/*.hh" "${FLMOD_LINT_DIR}/*.inl"
-  "${FLMOD_LINT_DIR}/*.ipp" "${FLMOD_LINT_DIR}/*.c" "${FLMOD_LINT_DIR}/*.cpp" "${FLMOD_LINT_DIR}/*.cc")
+# The file set (extensions, tests/ excluded) is shared with the root CMakeLists.txt: cmake/LogicLintFiles.cmake.
+include("${CMAKE_CURRENT_LIST_DIR}/LogicLintFiles.cmake")
+flmod_logic_lint_files(_files "${FLMOD_LINT_DIR}")
 
 set(_violations "")
 foreach(_f IN LISTS _files)

@@ -21,7 +21,8 @@ cmake --preset win32-trackB && cmake --build --preset win32-trackB     # plain d
 # 4. Import check (reads the prefix's syswow64 and the game's EXE dir; never writes)
 $FLMOD_VENV/bin/python -I toolchain/check_imports.py build/win32-trackB/out/*.dll build/win32-trackB/out/*.exe --prefix /home/user/freelancer/prefix
 $FLMOD_VENV/bin/python -I toolchain/check_imports.py build/win32-trackA/out/*.dll --prefix /home/user/freelancer/prefix --allow-fluf
-# 5. Runtime load proof + EH probe in a throwaway reflink clone of the play prefix (created and deleted)
+# 5. Runtime load proof + EH probe in a throwaway reflink clone of a dev baseline (default prefix-dev-base-B;
+#    created and deleted; the play prefix is never needed)
 toolchain/load_proof.sh build/win32-trackB --clone prefix-dev-toolchain-$USER
 toolchain/ehprobe.sh --build build/win32-trackA --clone prefix-dev-toolchain-a --crt both
 ```
@@ -60,7 +61,10 @@ than a stripped build (hello_a.dll ≈ 1.6 MB).
 **Never override `/EHa` or `-mstackrealign` per target** (no `target_compile_options` that drop or replace them,
 no `CMAKE_CXX_FLAGS` overrides). `-mstackrealign` is what makes an exception leaving a catch block survive under
 Wine's builtin vcruntime140; `/EHa` is what lets `__try/__except` catch a fault in its own function. Details and
-the coding rules that no flag fixes: `ABI.md` §6. The EH probe's `c_*` cases FAIL if the flag goes missing.
+the coding rules that no flag fixes: `ABI.md` §6 (hooks: the template in §6.7). CI stage 10 enforces the flags
+statically: `toolchain/check_flags.py` reads each win32 `compile_commands.json` and fails unless every clang-cl TU
+has `/clang:-mstackrealign` (not undone by a later `-mno-stackrealign`), `/MD` and `-D_ITERATOR_DEBUG_LEVEL=0`, and
+every C++ TU has `/EHa` as its last `/EH` flag. The EH probe's `c_*` cases FAIL at run time if the flag goes missing.
 
 ## Adding a target (spikes, modules, tools)
 
@@ -78,8 +82,30 @@ Sources are discovered too (globs are relative to their root, so it does not mat
 |---|---|
 | `src/logic/**/*.cpp` (except under any `tests/` dir) | the `logic` static library (host and win32) |
 | `tests/host/**/*.cpp` (except `tests/host/negative/`) | `host_tests` |
-| `src/**/tests/**/*.cpp`, at any depth (`src/logic/<area>/tests/`, `src/logic/<area>/tests/<sub>/`, …) | `host_tests` |
-| `src/game/**` | **nothing, on purpose.** Engine-facing code is compiled by the module DLL that ships it: ARCH-0's `src/module/<mod>/CMakeLists.txt` must `file(GLOB_RECURSE … CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/game/*.cpp")` into its target. |
+| `src/**/tests/**/*.cpp`, at any depth: `src/logic/<area>/tests/`, `src/game/<area>/tests/`, `src/module/<x>/tests/`, nested `tests/<sub>/` | `host_tests` (Linux only, never a win32 binary) |
+| the rest of `src/game/**` | **nothing in the root CMake, on purpose.** Engine-facing code is compiled by the module DLL that ships it (below). |
+
+**The `src/game` rule (ARCH-0, W1-PLATFORM):**
+
+- Engine-facing sources in `src/game/<area>/` are compiled only into the module DLL. ARCH-0's
+  `src/module/<mod>/CMakeLists.txt` globs them and **must exclude `tests/` and `scenarios/` dirs**, or doctest files
+  end up in the DLL:
+
+  ```cmake
+  file(GLOB_RECURSE _game_rel RELATIVE "${PROJECT_SOURCE_DIR}/src/game" CONFIGURE_DEPENDS
+       "${PROJECT_SOURCE_DIR}/src/game/*.cpp")
+  list(FILTER _game_rel EXCLUDE REGEX "(^|/)(tests|scenarios)/")
+  list(TRANSFORM _game_rel PREPEND "${PROJECT_SOURCE_DIR}/src/game/")
+  target_sources(<module target> PRIVATE ${_game_rel})
+  ```
+
+- Host tests for `src/game` code live in `src/game/<area>/tests/*.cpp` (e.g. W1-PLATFORM's
+  `src/game/platform/tests/`). They are built into `host_tests` by the root glob above, on Linux, so they may only
+  include what compiles on the host: `src/logic`, `src/contracts`, doctest, and `src/game` headers that are themselves
+  free of Windows/FLSDK/FLUF headers (pure helpers tested with fakes). They are not linted by the `src/logic` rule;
+  the host compile is their check. Code under test must be header-only, or host-compilable `.cpp` files added with
+  `flmod_host_tests(SOURCES …)` from a CMakeLists.txt that runs in host builds (not one guarded by
+  `flmod_win32_only()`).
 
 Re-run `cmake --preset …` after adding files; `CONFIGURE_DEPENDS` usually does it for you.
 
@@ -141,6 +167,14 @@ Every DLL/EXE ends up in `build/<preset>/out/`.
    include path (`tests/host/LogicHeaderCheck.cmake`, target `logic_header_check`, ctest
    `logic_headers_standalone`).
 
+Both skip everything under a `tests/` directory: `src/logic/<area>/tests/` holds host-only doctest code (never in
+`logic` or a win32 binary) that includes `<doctest/doctest.h>` and test helpers, and a Windows header there fails
+the host compile anyway. The file set is defined once, in `cmake/LogicLintFiles.cmake`, and used by the lint script,
+the lint's build dependencies and the header check, so fresh and incremental builds see the same files. ctest
+`logic_tests_dir_doctest` proves it: on a scratch copy of the tree it adds a doctest file and a doctest-including
+helper header under `src/logic/zz_fixture/tests/`, then builds incrementally and from scratch, runs the test case in
+`host_tests`, and runs the lint and header-check tests.
+
 ctest also runs negative probes that must fail **with the expected message** (`tests/host/ExpectFailure.cmake`):
 `logic_rejects_windows_h_compile` ("'windows.h' file not found") and `logic_rejects_forbidden_includes_lint`
 ("Forbidden includes", over the fixtures in `tests/host/negative/lint_fixture/`). A broken toolchain or a missing
@@ -163,9 +197,13 @@ lives in.
 
 | Stage | Does | SKIPs (exit 77) when |
 |---|---|---|
-| `10-build.sh` | configure + build `host` and the win32 preset(s): `FLMOD_TRACK=A\|B` picks one; unset builds both | cmake/ninja/clang or the vendor tree is missing; win32 part skipped (noted) without clang-cl/XWIN_ROOT, Track A without the FLUF vendor tree |
+| `10-build.sh` | configure + build `host` and the selected win32 preset(s), then `check_flags.py` on each win32 `compile_commands.json` (a missing flag is a FAIL) | cmake/ninja/clang or the vendor tree is missing; win32 part skipped (noted) without clang-cl/XWIN_ROOT, Track A without the FLUF vendor tree |
 | `20-host-tests.sh` | `ctest --preset host`; with `CI_MODE=full` also `host-asan` | same prerequisites |
-| `50-import-check.sh` | `check_imports.py` over the binaries listed in `build/win32-track*/flmod_binaries.txt` (`--allow-fluf` for Track A); a listed but missing binary is a FAIL | no win32 build output, no `llvm-readobj`, or no prefix (`FLMOD_IMPORT_CHECK_PREFIX`, default the play prefix, read-only) |
+| `50-import-check.sh` | `check_imports.py` over the binaries listed in `build/win32-track<T>/flmod_binaries.txt` of the **selected** tracks only (`--allow-fluf` for Track A); a listed but missing binary is a FAIL | no build output for the selected tracks, no `llvm-readobj`, or no prefix (`FLMOD_IMPORT_CHECK_PREFIX`, default the play prefix, read-only) |
+
+Track selection is shared by stages 10 and 50 (`toolchain/ci_tracks.sh`): `FLMOD_TRACK=A` or `B` selects that
+track, unset or empty selects every track whose inputs exist, and any other value FAILs both stages. So stage 50
+never checks a stale build dir of a track stage 10 did not build.
 
 ## check_imports.py
 
@@ -182,27 +220,43 @@ maps them there); the game's `Common.dll` etc.; FLUF.dll. Tests (the delay-impor
 
 ## Load proof and EH probe (Wine, no game)
 
-- `toolchain/load_proof.sh <win32-trackB build dir> [--clone <prefix-dev-name>] [--keep] [--crt builtin|native|both]`:
-  refuses unless the play prefix is idle (`tools/play_prefix_busy.sh`), reflink-clones it to
-  `/home/user/freelancer/<clone>` (name must start with `prefix-dev`; use a unique name for concurrent runs),
-  runs `loadtest.exe hello_b.dll FlmodSelfTest` (expects `CreateID(li02)=2745692751`), then the EH probe, then
-  `wineserver -k` for that clone only and deletes it. Output: `$FLMOD_TESTRUNS/<stamp>-toolchain-loadproof/`.
-- `toolchain/ehprobe.sh --build <win32 build dir> (--prefix <prefix-dev*/prefix-lane*> | --clone <prefix-dev-name>)
-  [--crt builtin|native|both] [--run-dir D]`: runs every case of `ehprobe_cases.tsv` (`src/module/ehprobe/`) in its
-  own `loadtest.exe` process and prints `EHPROBE crt=… case=… status=PASS|KNOWN-BROKEN|FAIL …` lines plus a summary.
-  Exit 0 = no FAIL, 1 = FAIL, 77 = prerequisites missing. With `--prefix` it uses a scratch dir inside that prefix,
-  removes it afterwards and never kills the prefix's wineserver (a lane may be running the game). `--crt native`
-  copies MSVC's 14.51 redist DLLs (`$FLMOD_VENDOR/msvc-redist/x86`) next to the exe. Expected today: 24 PASS,
-  3 KNOWN-BROKEN, 0 FAIL per runtime, on both tracks. What the KNOWN-BROKEN cases mean: `ABI.md` §6.
+Both scripts work on a throwaway reflink clone named `/home/user/freelancer/prefix-dev-<something>` (never
+`prefix-dev-base*`; use a unique name for concurrent runs) of a **source** prefix chosen with `--from`:
+`prefix-dev-base-B` (default: P0-HARNESS's Track B baseline, HDE intact), `prefix-dev-base-A`, or `play` (the play
+prefix, only while `tools/play_prefix_busy.sh` says it is idle). The source is only read, and is refused while any
+process has its cwd in it or `WINEPREFIX` pointing at it (`toolchain/prefix_clone.sh`). Every argument is validated
+before a run dir or clone is created. Afterwards they `wineserver -k` that clone only and delete it.
 
-Neither creates a D3D device, so the renderer (DXVK or wined3d) plays no part.
+- `toolchain/load_proof.sh <win32-trackB build dir> [--clone <name>] [--from <src>] [--keep] [--crt builtin|native|both]`:
+  runs `loadtest.exe hello_b.dll FlmodSelfTest` in the clone's game EXE dir (expects `CreateID(li02)=2745692751` on
+  the console and in `hello_b.log`), then the EH probe on the same clone. Output:
+  `$FLMOD_TESTRUNS/<stamp>-toolchain-loadproof/`. Exit 0 PASS, 1 FAIL, 2 usage, 3 source in use, 77 a prerequisite
+  or a requested EH runtime missing.
+- `toolchain/ehprobe.sh --build <win32 build dir> (--clone <name> [--from <src>] | --prefix <prefix-dev-*>)
+  [--crt builtin|native|both] [--run-dir D]`: runs every case of `ehprobe_cases.tsv` (`src/module/ehprobe/`) in its
+  own `loadtest.exe` process and prints `EHPROBE crt=… case=… status=PASS|KNOWN-BROKEN|FAIL|SKIP …` lines plus a
+  summary. `--prefix` accepts only an existing throwaway `prefix-dev-*` prefix (not a baseline, not a lane: a lane's
+  wineserver may be running the game); it uses a scratch dir inside it and never kills its wineserver. `--crt
+  native` copies MSVC's 14.51 redist DLLs (`$FLMOD_VENDOR/msvc-redist/x86`) next to the exe. Cases that need the
+  game's `Common.dll` get its directory in `FLMOD_EHPROBE_GAME_EXE` and report SKIP without it. Exit 0 = no FAIL
+  and every requested runtime ran, 1 = FAIL, 2 = usage, 3 = source in use, 77 = a prerequisite or a requested
+  runtime missing (a run never PASSes with zero cases). Expected today: 37 PASS, 3 KNOWN-BROKEN, 0 FAIL, 0 SKIP per
+  runtime, on both tracks. What the KNOWN-BROKEN cases mean: `ABI.md` §6.
+
+**Who runs the EH probe:** not CI (it needs Wine); stage 10's `check_flags.py` guards the flags statically.
+Proposed (for the orchestrator to put into those specs): P0-TRACK-A/B and W1-PLATFORM acceptance run
+`toolchain/ehprobe.sh --build build/win32-track<T> --clone prefix-dev-<pkg> --crt both`, and so does every change
+to `toolchain/` or `cmake/` compile flags.
+
+Neither script creates a D3D device, so the renderer (DXVK or wined3d) plays no part.
 
 ## Gotchas found here
 
 - **Wine drops a console app's stdout when it is redirected to a regular file.** Pipe it instead
   (`wine app.exe | cat > out.txt`); ptys and Windows-side redirects also work. Details: `NOTES.md` "Bug 1".
-- **The play prefix (and every clone of it) has `DllOverrides` `msvcp140*`, `vcruntime140*`, `concrt140`,
-  `ucrtbase` = `native,builtin`, while `syswow64` holds Wine's builtins.** So a `vcruntime140.dll`/`msvcp140.dll`
+- **The play prefix (and every clone of it, both dev baselines included) has `DllOverrides` `msvcp140*`,
+  `vcruntime140*`, `concrt140`, `ucrtbase` (and the older MSVC runtimes) = `native,builtin`, while `syswow64` holds
+  Wine's builtins.** So a `vcruntime140.dll`/`msvcp140.dll`
   dropped next to `Freelancer.exe` switches the whole process to that native runtime with no environment variable
   (VERIFIED with `WINEDEBUG=+loaddll`, `NOTES.md` "Question 3"). Never leave CRT DLLs in a lane's EXE dir by
   accident; `WINEDLLOVERRIDES=vcruntime140,msvcp140=b` forces the builtins back.
