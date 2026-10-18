@@ -1,0 +1,59 @@
+# Public-safety gate on GitHub (REQ-P0-REPO-8). No secrets, no game, no network
+# beyond fetching the checkout and Python packages.
+name: public-safety
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  public-safety:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 = the checker's minimum; 3.13 = the build venv's version.
+        python-version: ["3.11", "3.13"]
+    steps:
+      # v7 = the current majors (node24 runtime); v4 and v5 declare the node20 runtime.
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: check_public --tree .
+        run: python3 -I tools/check_public.py --tree .
+
+      - name: install test dependencies (requirements-dev.txt, pure Python)
+        run: |
+          python3 -m pip install --quiet --upgrade pip
+          python3 -m pip install --quiet -r requirements-dev.txt
+
+      # Host-only suites. toolchain/ and harness/ tests need llvm/wine and stay local (harness/ci.sh).
+      # One pytest run per directory: the suites have no __init__.py, import their own `conftest`
+      # module by name and share basenames (test_safety.py), so a single run fails collection.
+      - name: pytest tests/py and sidecar/tests (the directories that exist)
+        run: |
+          status=0
+          ran=0
+          for d in tests/py sidecar/tests; do
+            if [ -d "$d" ]; then
+              ran=1
+              echo "::group::pytest $d"
+              rc=0
+              python3 -m pytest "$d" -q || rc=$?
+              # 5 = no tests collected (an empty suite is not a failure)
+              if [ "$rc" != 0 ] && [ "$rc" != 5 ]; then status=1; fi
+              echo "::endgroup::"
+            else
+              echo "$d not present; skipped"
+            fi
+          done
+          if [ "$ran" = 0 ]; then
+            echo "no test directories present; skipping"
+          fi
+          exit "$status"

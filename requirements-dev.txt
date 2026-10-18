@@ -1,0 +1,6 @@
+# Python test dependencies for the shared venv ($FLMOD_VENV) and GitHub Actions (public-safety.yml).
+# Pure Python only (Actions has no game, wine, llvm or GPU). Append-only: packages add lines; the orchestrator
+# unions them at merge. Python 3.11+.
+pytest>=9.1,<10
+PyYAML>=6.0.3,<7
+jsonschema>=4.26,<5

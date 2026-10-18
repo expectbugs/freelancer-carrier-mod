@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Public-safety gate (REQ-P0-REPO-5): vet the staged files before every commit.
+# Enabled in the shared repo config with an absolute path (DECISIONS D101):
+#   git config core.hooksPath /home/user/freelancer/carrier-mod/.githooks
+# so every worktree, including ones branched before these hooks existed, runs the
+# main checkout's hooks and checker. Never bypass it with --no-verify.
+set -u
+
+hook_dir="$(dirname "$(realpath "$0")")"
+top="$(git rev-parse --show-toplevel)" || exit 1
+# The checker next to the hook directory first (main's checker for every worktree),
+# then the committing work tree's own copy (a clone with a relative hooksPath).
+checker="$hook_dir/../tools/check_public.py"
+[ -f "$checker" ] || checker="$top/tools/check_public.py"
+if [ ! -f "$checker" ]; then
+    echo "pre-commit: tools/check_public.py not found next to $hook_dir or in $top; refusing to commit without the public-safety check." >&2
+    exit 1
+fi
+
+# Git's own environment (GIT_INDEX_FILE for `git commit -a` / partial commits) is
+# inherited, so the checker sees exactly what is being committed.
+python3 -I "$checker" --staged
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "pre-commit: public-safety check failed (exit $rc); commit blocked." >&2
+    echo "pre-commit: unstage or fix the files above; 'python3 -I tools/check_public.py --explain' lists the rules." >&2
+    exit 1
+fi
+exit 0

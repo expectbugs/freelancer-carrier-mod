@@ -1,0 +1,74 @@
+# P0-REPO notes
+
+Package P0-REPO owns `.github/` (this file, the workflow), `tools/check_public.py`, `.githooks/`,
+`harness/ci.sh`, `harness/ci.d/README.md`, `README.md` (until W5-SHIP), `tests/py/test_check_public.py` and
+`requirements-dev.txt` (shared, append-only). This file moved here from `harness/ci.d/` in fix round 2 (review r2
+finding 7: that directory holds CI drop-ins, and the spec owns only its README).
+
+## RESUME POINT (fix round 2 of attempt 1, 2026-10-18): complete
+
+Review r2 (`state/reports/P0-REPO-r2.md`) and D108 are addressed on `wp/P0-REPO`. Nothing is left open for
+P0-REPO in this round. Evidence: `$FLMOD_TESTRUNS/20261018T073321Z-p0-repo-fix2/` (scripts in `scripts/`).
+Earlier rounds: `20261018T052428Z-p0-repo-fix1/` (r1 fixes), `20261018T063805Z-p0-repo-resume/` (re-check after
+the reboot).
+
+If interrupted again: re-run `pytest tests/py/test_check_public.py` (3.13 and 3.11), `check_public --tree` on the
+worktree and the main checkout, `scripts/r5eval.py` (recall and false positives) and `harness/ci.sh --quick`.
+
+### Review r2 findings
+
+| # | What changed | Tests |
+|---|---|---|
+| 1 R5 blocks our own schemas | D108 escape: `check_public: authored-data <reason>` in the first 5 lines turns R5 into a warning, only under `data/ tests/ harness/ gen/ docs/spec/ src/**/tests/`. The reason must contain a letter or digit. It never applies to R1, R2, R4 or R7, to base64-embedded text, to binary content or inside archives. The R5 message names the escape. The table rule counts only FL-distinctive columns. | `test_r5_authored_data_header_*`, `test_r5_table_counts_only_distinctive_columns` |
+| 2 compact JSON, flow YAML, dict literals | Lines over 4000 characters: line-anchored forms read the head, inline pairs are read in 4 KB chunks with a 512-byte overlap (a pair counts in the chunk where it starts). Inline matchers: quoted keys (JSON, `'k': v` repr/dict literals) and flow-style keys after `{`/`,`. In code, only pairs with literal values count, and the plain "sections + any keys" rule is off (patch-op dicts use a `section` key). Numeric vectors inside list values count as FL-shaped values. R7 also tries lines over 1000 characters re-broken one item per line (query side only; the index format is unchanged). | `test_r5_compact_json_flow_yaml_dict_literals_and_long_lines_rejected`, `test_r5_own_code_with_fl_names_passes`, `test_r5_corpus_hde_ini_rejected_in_every_text_form`, `test_r5_r7_corpus_minified_r3data_extracts_rejected` |
+| 3 R4-email false positives | `git@<host>:` and `ssh://git@<host>` are clone URLs. Vetted `docs/` images get the blocklist, real secret shapes and R5 on their bytes (R5 kept: FL data in a PNG text chunk; it needs 20 FL key pairs, so noise cannot trip it). | `test_r4_git_ssh_clone_urls_are_not_emails`, `test_r1_vetted_docs_image_bytes_get_blocklist_secret_shapes_and_r5_only` |
+| 4 decomp exemption too wide | Citations allowed only under `docs/`, in documentation files (`.md .markdown .rst .txt`) under `state/` (the ledger cites the decomp in reviews and briefs), or in files named `NOTES*`/`README*`. | `test_r4_decomp_marker_doc_exemption_is_limited`, `test_r4_decomp_marker_may_be_cited_in_docs` |
+| 5 table header position, HTML | CSV/TSV/semicolon header within the first 10 non-blank, non-comment lines; Markdown pipe tables and HTML tables (`th` or first-row `td`) anywhere. | `test_r5_table_header_after_comments_and_markdown_and_html_tables` |
+| 6 short signatures | Bink (`BIK`/`KB2`) and both PDB headers need a NUL byte; cab needs `MSCF` plus 4 zero bytes; PSD needs version 1 or 2. | `test_r1_text_that_starts_like_a_short_signature_is_text`, `MAGIC_CASES` |
+| 7 notes location | This file. | n/a |
+| 8 + D108 | `api_key` is a marker only in assignment/value form: lower-case `name = …`, `"name": …`, `name: …`, and upper-case `NAME=…`. An upper-case env-var name as a dict key or string (env allowlists in sidecar tests) is not a marker. `w:<literal>` blocklist entries match whole words (no letter, digit or underscore on either side) in content, paths and UTF-8/UTF-16LE bytes. | `test_r4_api_key_names_are_markers_only_in_assignment_form`, `SECRET_MARKERS`, `test_r4_blocklist_word_entries_match_whole_words_only` |
+| CI | `requirements-dev.txt` (pytest, PyYAML, jsonschema). The workflow installs it, pins `actions/checkout@v7` and `actions/setup-python@v7`, and runs pytest once per existing directory among `tests/py` and `sidecar/tests`. | `test_workflow_*` |
+
+### Measurements (fix round 2)
+
+- HDE INI files with 50 or more key lines (345), rejected by R5 alone: Markdown, text, block YAML and flow YAML
+  98.8%; indented, compact and minified JSON and repr dumps 96.5%; Python dict literals in a `.py` file 92.5%
+  (`r5-recall-and-negatives.txt`).
+- R3-data JSON extracts minified to one line: 15 of 15 rejected (12 by R5; the other 3 by R7 through the re-broken
+  query).
+- False positives: R5 flags 0 of 777 text files (main @635be56, DATATOOLS @4d9b317, HARNESS @181ebcc,
+  SIDECAR @824564a, TOOLCHAIN @5825345, this worktree). The full checker passes every one of those trees
+  (`negatives-full-checker.txt`). Random-byte PNGs under `docs/`: 0 of 300 flagged when vetted; the same bytes
+  under every rule give 3 of 300 (`png-noise.txt`).
+- Mutation check: 25 of 25 mutations of the new code are caught (`mutate3.txt`).
+- Actions approximation (scrubbed environment, Python 3.11, only `requirements-dev.txt`, git work tree of
+  DATATOOLS + SIDECAR + this branch): `check_public --tree` OK; `tests/py` 333 passed, 13 skipped;
+  `sidecar/tests` 279 passed, 17 skipped (`actions-sim.txt`). A single combined pytest run fails collection
+  (sidecar tests import `conftest` by name and get DATATOOLS'; `actions-sim-combined.txt`), hence one run per
+  directory.
+
+### Decisions (fix round 2)
+
+- D108 escape implemented as written, plus: no escape for base64-embedded, binary or archive-member content.
+- `state/` documentation files may cite the decomp (the ledger does), besides `docs/` and `NOTES*`/`README*`.
+- `api_key`: upper case counts only in `NAME=` form (D108's list), so env allowlist code can name the variable.
+- Vetted images keep R5 on their bytes, besides the blocklist and real secret shapes.
+- In code files, a `section` key does not make INI sections count without FL key pairs.
+
+### For the orchestrator
+
+- After merge: convert the short tailnet-host blocklist entry to `w:<literal>` (D108). Amend CONVENTIONS §12 to
+  require the `check_public: authored-data <reason>` header (JSON has no comments: put it in a string value of the
+  first key, e.g. `"_check_public": "check_public: authored-data …"`, and let the schema allow that key).
+- First push: squash-merge `wp/P0-REPO` (D106: intermediate commits fail `--commits=main..wp/P0-REPO`:
+  95db516 and 257ef54 spell the decomp name, and they and 32ab66a hold old api-key assignment test fixtures
+  that the D108 marker now matches; the tip is
+  clean, and `--commits=main` passes on all 54 commits of main @635be56), run
+  `tools/check_public.py --tree .` and `--commits=main`, push, then check the first Actions run on both Python
+  versions. No index or blocklist exists on Actions (R7 and the blocklist only warn there).
+
+## History
+
+- Review r1 (F1–F13): fixed in `0ecf9b4`; see `20261018T052428Z-p0-repo-fix1/` and `state/reports/P0-REPO-r1.md`.
+- Session 2 re-check after the GPU-reset reboot: `32ab66a`.
+- Review r2: fixed in fix round 2 (this file).

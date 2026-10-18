@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Public-safety gate for merge commits. `git merge` runs pre-merge-commit (not
+# pre-commit) when it creates a merge commit without conflicts; the index then holds
+# the merge result, so the same staged check applies. Runs the sibling pre-commit
+# from this hook's real location (works with an absolute core.hooksPath).
+exec "$(dirname "$(realpath "$0")")/pre-commit" "$@"
