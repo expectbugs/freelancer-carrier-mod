@@ -7,11 +7,18 @@ set -u
 H1="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 TMP=$(mktemp -d); trap 'cleanup' EXIT
 cp -a "$H1" "$TMP/harness"; H2="$TMP/harness"
-pass=0; fail=0
+pass=0; fail=0; skipped=0
+ACQ_ERR="$TMP/acq.err"
+source "$H1/tests/lib_contention.sh"
 ok()  { echo "PASS $*"; pass=$((pass+1)); }
-bad() { echo "FAIL $*"; fail=$((fail+1)); }
+# a failed check whose last acquire lost to ANOTHER agent's lock is a SKIP, not a FAIL (review b-r1)
+bad() {
+  if contention; then echo "SKIP $* (lock contention with another agent: $(tail -1 "$ACQ_ERR"))"; skipped=$((skipped+1))
+  else echo "FAIL $*"; fail=$((fail+1)); fi
+}
 tok() { sed -n "s/^export LANE_TOKEN=//p" <<<"$1"; }
-acq() { local h=$1; shift; "$h/lane.sh" acquire --track B --keep-prefix --owner test_lanes "$@" 2>/dev/null; }
+acq() { local h=$1; shift; "$h/lane.sh" acquire --track B --keep-prefix --owner test_lanes "$@" 2>"$ACQ_ERR"; }
+if foreign_sw; then echo "SKIP a wined3d-sw lane is held by another agent: every default-class acquire would wait"; exit 77; fi
 cleanup() {
   for f in "$FLMOD_LOCKS"/lane-[678].owner; do
     [ -f "$f" ] && "$H1/lane.sh" release "$(sed -n 's/^token=//p' "$f")" >/dev/null 2>&1
@@ -30,6 +37,9 @@ cleanup() {
 }
 
 others=$(ls "$FLMOD_LOCKS"/lane-*.owner 2>/dev/null | grep -v 'lane-[678].owner' | wc -l)
+# parallel-safe (review r2): checks that would wait for, or block, other agents' lanes skip while those are held
+foreign_lanes() { ls "$FLMOD_LOCKS"/lane-*.owner 2>/dev/null | grep -v 'lane-[678].owner' | wc -l; }
+input_free() { flock -n "$FLMOD_LOCKS/input.lock" true; }
 
 # 1. cross-worktree contention on the same lane
 o1=$(acq "$H1" --lane 6 --wait 30); t1=$(tok "$o1")
@@ -67,6 +77,9 @@ fi
 [ -n "${t1:-}" ] && "$H1/lane.sh" release "$t1" >/dev/null 2>&1
 
 # 3. input lock is global and exclusive
+if ! input_free; then
+  echo "SKIP input-lock checks: input.lock is held by another agent right now"
+else
 ia=$(acq "$H1" --lane 6 --input --wait 30); ta=$(tok "$ia")
 [ -n "$ta" ] && ok "lane 6 with --input" || bad "lane 6 --input"
 ib=$(acq "$H2" --lane 7 --input --wait 4); rc=$?
@@ -78,6 +91,7 @@ ic=$(acq "$H2" --lane 7 --wait 20); tc=$(tok "$ic")
 ib=$(acq "$H2" --lane 7 --input --wait 20); tb=$(tok "$ib")
 [ -n "$tb" ] && ok "--input free again after release" || bad "--input not freed"
 "$H2/lane.sh" release "$tb" >/dev/null 2>&1
+fi
 
 # 4. reap frees a lane whose owner process died
 sleep 300 & fake=$!
@@ -132,7 +146,11 @@ hio=$(bash -c "source '$H1/lib/common.sh'; source <(sed -n '/^holder_is_ours()/,
 kill "$sp"; wait "$sp" 2>/dev/null
 [ "$(echo $hio)" = "nostart-yes start-yes wrongstart-no notsleep-no" ] && ok "holder_is_ours: comm + cmdline + start time" || bad "holder_is_ours: '$hio'"
 
-# 10. renderer classes never mix (review r1 m10): a wined3d-sw lane waits while a DXVK lane is held, and vice versa
+# 10. renderer classes never mix (review r1 m10): a wined3d-sw lane waits while a DXVK lane is held, and vice versa.
+#     Skipped while other agents hold lanes: a sw lane would then wait for them, and while held it would stall them.
+if [ "$(foreign_lanes)" -gt 0 ]; then
+  echo "SKIP renderer-class checks: $(foreign_lanes) lane(s) held by other agents right now"
+else
 og=$(acq "$H1" --lane 6 --renderer dxvk --wait 30); tg=$(tok "$og")
 os_=$(acq "$H2" --lane 7 --renderer wined3d-sw --wait 4); rc=$?
 [ -n "$tg" ] && [ $rc -ne 0 ] && ok "sw lane refused while a dxvk lane runs" || { bad "sw lane got a lane next to dxvk"; "$H2/lane.sh" release "$(tok "$os_")" >/dev/null 2>&1; }
@@ -143,28 +161,83 @@ os_=$(acq "$H2" --lane 7 --renderer wined3d-sw --wait 10); ts=$(tok "$os_")
 og=$(acq "$H1" --lane 6 --renderer dxvk --wait 4); rc=$?
 [ -n "$ts" ] && [ $rc -ne 0 ] && ok "dxvk lane refused while a sw lane runs" || { bad "dxvk lane next to sw"; "$H1/lane.sh" release "$(tok "$og")" >/dev/null 2>&1; }
 "$H2/lane.sh" release "$ts" >/dev/null 2>&1
+fi
 
 # 12. recreating a lane prefix kills only Wine processes of that prefix (review r1 m2): a plain `sleep` that merely
 #     has WINEPREFIX=<lane> in its environment survives
 env WINEPREFIX=/home/user/freelancer/prefix-lane-8 sleep 120 & bystander=$!
-ob=$("$H1/lane.sh" acquire --track B --lane 8 --owner test_lanes --wait 60 2>/dev/null); tb8=$(tok "$ob")
+ob=$("$H1/lane.sh" acquire --track B --lane 8 --owner test_lanes --wait 60 2>"$ACQ_ERR"); tb8=$(tok "$ob")
 kill -0 "$bystander" 2>/dev/null && ok "non-wine process with the lane's WINEPREFIX survived the prefix recreate" \
   || bad "prefix recreate killed a non-wine process"
 kill "$bystander" 2>/dev/null; wait "$bystander" 2>/dev/null
 "$H1/lane.sh" release "$tb8" >/dev/null 2>&1
 
 # 11. baseline lock: a lane clone waits while baseline.sh would hold baseline-B exclusively
-( exec 8>"$FLMOD_LOCKS/baseline-B.lock"; flock -x 8; sleep 6 ) & bl=$!
+( exec 8>"$FLMOD_LOCKS/baseline-B.lock"; flock -x 8; sleep 4 ) & bl=$!
 sleep 0.5
 t0=$(date +%s)
-ob=$("$H1/lane.sh" acquire --track B --lane 8 --owner test_lanes --wait 60 2>/dev/null); tb=$(tok "$ob")
+ob=$("$H1/lane.sh" acquire --track B --lane 8 --owner test_lanes --wait 60 2>"$ACQ_ERR"); tb=$(tok "$ob")
 dt=$(( $(date +%s) - t0 ))
 wait "$bl"
-[ -n "$tb" ] && [ "$dt" -ge 4 ] && ok "lane clone waited ${dt}s for the exclusive baseline lock" || bad "lane clone did not wait for the baseline lock (dt=$dt token=${tb:-none})"
+[ -n "$tb" ] && [ "$dt" -ge 2 ] && ok "lane clone waited ${dt}s for the exclusive baseline lock" || bad "lane clone did not wait for the baseline lock (dt=$dt token=${tb:-none})"
 "$H1/lane.sh" release "$tb" >/dev/null 2>&1
 
+# 13. global lock order (review r2): baseline.sh fluf-init takes input.lock BEFORE baseline-A, the order a
+#     `--track A --input` lane uses (holder: input; then the clone: baseline-A shared). The reviewer's stand-in
+#     (inversion.txt) held baseline-A first and timed out; with one order neither side can deadlock.
+#     `baseline.sh fluf-init-lock-probe <s>` takes exactly fluf-init's locks, in fluf-init's order, and sleeps.
+if ! input_free; then
+  echo "SKIP lock-order checks: input.lock is held by another agent right now"
+else
+  # a) probe first (as in inversion.txt), lane second
+  INPUT_LOCK_WAIT_S=30 "$H1/baseline.sh" fluf-init-lock-probe 4 >/dev/null 2>&1 & pr=$!
+  sleep 1
+  t0=$(date +%s)
+  oa=$("$H1/lane.sh" acquire --track A --lane 8 --input --owner test_lanes --wait 60 2>"$ACQ_ERR"); ta8=$(tok "$oa")
+  dt=$(( $(date +%s) - t0 )); wait "$pr"; prc=$?
+  [ -n "$ta8" ] && [ $prc -eq 0 ] && ok "fluf-init locks then an A --input lane: both succeed (lane waited ${dt}s)" \
+    || bad "lock order (probe first): probe rc=$prc lane token=${ta8:-none} after ${dt}s"
+  "$H1/lane.sh" release "$ta8" >/dev/null 2>&1
+  # b) lane first, probe second: the probe waits for input.lock and gets it once the lane is released
+  oa=$("$H1/lane.sh" acquire --track A --lane 8 --input --owner test_lanes --wait 60 2>"$ACQ_ERR"); ta8=$(tok "$oa")
+  INPUT_LOCK_WAIT_S=30 "$H1/baseline.sh" fluf-init-lock-probe 1 >/dev/null 2>&1 & pr=$!
+  sleep 3
+  kill -0 "$pr" 2>/dev/null && ok "probe waits for input.lock while the A --input lane holds it" || bad "probe did not wait"
+  "$H1/lane.sh" release "$ta8" >/dev/null 2>&1
+  wait "$pr"; prc=$?
+  [ $prc -eq 0 ] && ok "probe completes after the lane is released (no deadlock)" || bad "probe rc=$prc after the lane release"
+fi
+
+# 14. contention with another agent is a SKIP (review b-r1): fake foreign holders, held for 6 s only, on the real
+#     lock files (test lanes 6-7 only; a track agent's acquire would wait those seconds, never fail)
+if ! input_free || foreign_sw; then
+  echo "SKIP contention self-test: a real foreign holder is active right now"
+else
+  ( exec 9>"$FLMOD_LOCKS/input.lock"; flock -x 9; sleep 6 ) & fh=$!
+  sleep 0.5
+  oc=$(acq "$H1" --lane 6 --input --wait 2); tc6=$(tok "$oc")
+  r=$(bad "probe: input acquire lost to a foreign holder")
+  [ -z "$tc6" ] && [[ "$r" == SKIP* ]] && ok "foreign input.lock holder: the failed check becomes SKIP ($r)" \
+    || { echo "FAIL contention(input) not recognised: token=${tc6:-none} -> $r"; fail=$((fail+1)); }
+  [ -n "$tc6" ] && "$H1/lane.sh" release "$tc6" >/dev/null 2>&1
+  wait "$fh"
+  ( exec 9>"$FLMOD_LOCKS/render-sw.lock"; flock -s 9; sleep 6 ) & fh=$!
+  sleep 0.5
+  foreign_sw && ok "foreign wined3d-sw lane detected (the suite would skip as a whole)" \
+    || { echo "FAIL foreign_sw not detected"; fail=$((fail+1)); }
+  oc=$(acq "$H1" --lane 7 --wait 2); tc7=$(tok "$oc")
+  r=$(bad "probe: default-class acquire lost to a foreign wined3d-sw lane")
+  [ -z "$tc7" ] && [[ "$r" == SKIP* ]] && ok "foreign renderer class: the failed check becomes SKIP ($r)" \
+    || { echo "FAIL contention(render) not recognised: token=${tc7:-none} -> $r"; fail=$((fail+1)); }
+  [ -n "$tc7" ] && "$H1/lane.sh" release "$tc7" >/dev/null 2>&1
+  wait "$fh"
+  : > "$ACQ_ERR"
+  r=$(bad "probe: a failure with no contention"); [[ "$r" == FAIL* ]] && ok "no contention: a failed check stays FAIL" \
+    || { echo "FAIL a plain failure was turned into: $r"; fail=$((fail+1)); }
+fi
+
 for n in 6 7 8; do
-  [ -f "$FLMOD_LOCKS/lane-$n.owner" ] && bad "lane $n still held at end"
+  [ -f "$FLMOD_LOCKS/lane-$n.owner" ] && { echo "FAIL lane $n still held at end"; fail=$((fail+1)); }
 done
-echo "test_lanes: pass=$pass fail=$fail"
+echo "test_lanes: pass=$pass fail=$fail skipped=$skipped"
 [ $fail -eq 0 ]

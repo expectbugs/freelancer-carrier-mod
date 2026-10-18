@@ -322,11 +322,15 @@ class Run:
     def pid_windows(pids: set[int], name_re: str) -> list[str]:
         """Visible windows titled name_re whose _NET_WM_PID is in pids, checked window by window. Never trust
         `xdotool search --pid P --name N`: it ORs the two (every lane's "Freelancer" window comes back), which once
-        made concurrent runners share one window id (NOTES.md N13)."""
+        made concurrent runners share one window id (NOTES.md N13). _NET_WM_PID is only a property any client can
+        set, so the X server's record of the window's creator (X-Resource, xinput.xres_pid) must agree as well; the
+        window found here is the one the runner moves, resizes, un-fullscreens and closes (review r2)."""
+        from xinput import xres_pid  # harness/lib/xinput.py (same gate as synthetic input)
+
         out = []
         for w in xdo("search", "--onlyvisible", "--name", name_re).split():
             p = xdo("getwindowpid", w)
-            if p.isdigit() and int(p) in pids:
+            if p.isdigit() and int(p) in pids and xres_pid(w) == int(p):
                 out.append(w)
         return out
 

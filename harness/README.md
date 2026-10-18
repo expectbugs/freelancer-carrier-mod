@@ -22,6 +22,25 @@ Working notes, hypotheses and every experiment behind the decisions below are in
 - Renderer classes never mix: no DXVK/GPU lane runs while a `wined3d-sw` lane does, and vice versa (lane.sh waits).
 - `baseline-<T>.lock`: baseline.sh holds it exclusively while creating or tweaking a baseline; lane.sh and
   deploy.sh hold it shared while cloning from it.
+
+### Lock order
+
+Every harness process takes the locks it needs in one global order, and never waits for an earlier lock while it
+holds a later one (`lib/common.sh`; review r2 found `fluf-init` taking baseline-A before input.lock, the reverse of
+a `--track A --input` lane):
+
+1. `lane-<N>.lock` → 2. `perf.gate` / `perf.lock` → 3. `render.gate` / `render-<class>.lock` → 4. `input.lock`
+→ 5. `baseline-<T>.lock`
+
+| Who | Locks, in order |
+|---|---|
+| `lane.sh acquire` | the holder takes 1-4 (4 only with `--input`); then the prefix clone takes 5 shared |
+| `deploy.sh` | runs inside a held lane (1-4); its rsync refresh takes 5 shared |
+| `baseline.sh create` | 5 exclusive |
+| `baseline.sh fluf-init` | 4 (`with_input_lock`, for FLUF's first-run dialog), then 5 exclusive; its `xinput.py --prefix` call finds the input lock on its ancestor and does not take it again |
+
+`tests/test_lanes.sh` §13 replays the reviewer's inversion (fluf-init's locks via `baseline.sh fluf-init-lock-probe`
+against a `--track A --input` lane, both orders): both sides complete, nobody times out.
 - Graceful exit first (devbridge `quit` or a window close), then the scoped `wineserver -k`. After a crash or
   kill, check `nvidia-smi -q | grep 'Recovery Action'` (GPU fault watch, D103).
 

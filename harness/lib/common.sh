@@ -106,6 +106,13 @@ effective_lanes() {
   if [ "$1" = wined3d-sw ] && [ "$LANES_SW" -lt "$LANES" ]; then echo "$LANES_SW"; else echo "$LANES"; fi
 }
 
+# GLOBAL LOCK ORDER (every harness process takes the locks it needs in this order, never the reverse; a process
+# that needs a later lock must not hold it while waiting for an earlier one; README.md "Lock order"):
+#   1. lane-<N>.lock   2. perf.gate / perf.lock   3. render.gate / render-<class>.lock   4. input.lock
+#   5. baseline-<T>.lock
+# lane.sh: the holder takes 1-4, then the clone takes 5 (shared). deploy.sh: holds 1(-4) via the lane, takes 5.
+# baseline.sh fluf-init: 4 (input, for FLUF's first-run dialog), then 5 (exclusive). baseline.sh create: 5 only.
+#
 # Baseline lock (P0-TOOLCHAIN r3 note): baseline.sh holds $FLMOD_LOCKS/baseline-<T>.lock exclusively while it
 # creates or tweaks a baseline; everything that clones from a baseline (lane.sh, deploy.sh) holds it shared.
 #   with_baseline_lock -x|-s <A|B> <command...>
@@ -116,6 +123,23 @@ with_baseline_lock() {
   if ! flock "$mode" -w "${BASELINE_LOCK_WAIT_S:-3600}" "$fd"; then
     exec {fd}>&-
     hlog "timeout waiting for the baseline-$track lock ($mode)"
+    return 75
+  fi
+  "$@"; rc=$?
+  flock -u "$fd"; exec {fd}>&-
+  return $rc
+}
+
+# input.lock held by this shell for the duration of <command...> (lock order step 4, before any baseline lock).
+# Children (xinput.py --prefix) find the open fd on an ancestor, so they must not take the lock again.
+#   with_input_lock <command...>
+with_input_lock() {
+  local fd rc
+  mkdir -p "$FLMOD_LOCKS"
+  exec {fd}>"$FLMOD_LOCKS/input.lock"
+  if ! flock -x -w "${INPUT_LOCK_WAIT_S:-900}" "$fd"; then
+    exec {fd}>&-
+    hlog "timeout waiting for input.lock"
     return 75
   fi
   "$@"; rc=$?

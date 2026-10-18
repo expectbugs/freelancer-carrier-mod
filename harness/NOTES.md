@@ -519,3 +519,18 @@ explorer; (9) a timing-only race unrelated to B; (10) xfwm4's "smart placement" 
 Not separated yet. **Fix in place (VERIFIED 2/2):** when placement fails, the runner records `_NET_WM_STATE`,
 removes MAXIMIZED/FULLSCREEN with `xdotool windowstate --remove`, and re-places; both reproduced cases reached the
 slot on the second try. If it ever stays fullscreen, the verdict is FAIL `window_not_at_slot`.
+
+## N20. Review r2 follow-up (branch wp/P0-HARNESS-b, D113)
+
+- **Lock order:** one global order (lane → perf → render → input → baseline), documented in README "Lock order" and
+  `lib/common.sh`. `baseline.sh fluf-init` now takes input.lock before baseline-A (`with_input_lock`); its
+  `xinput.py --prefix` call relies on the ancestor's fd. `test_lanes.sh` §13 replays the reviewer's inversion stand-in
+  through `baseline.sh fluf-init-lock-probe` in both orders: both sides complete (before: the stand-in timed out).
+- **Selftest DLL:** rebuilt on every selftest run (stale-DLL HANG seen by the reviewer).
+- **Runner window search:** `Run.pid_windows` (find, validity, place, windowquit target) also requires the
+  X-Resource creator pid (`xinput.xres_pid`); `test_input_gate.sh` checks it ignores the forged window.
+- **Parallel safety:** `test_lanes.sh` skips the input-lock, perf and renderer-class checks while other agents hold
+  lanes / input.lock; `test_input_gate.sh` exits 77 (SKIP) when input.lock is busy.
+- **CI stage 30** runs `harness/tests` (`test_shell_suites.py` wraps the shell suites). Clean-env evidence:
+  `p0-harness-evidence/r2-followup/envi-plain` (env -i: 139 passed, 4 skipped: no DISPLAY ×3, lanes opt-in ×1) and
+  `envi-noresources` (refs, baseline and clang hidden: 87 passed, 56 skipped, each with its reason).
