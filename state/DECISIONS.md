@@ -133,3 +133,22 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
 - **Choice:** `FLMOD_RENDERER=auto|dxvk|wined3d|wined3d-sw`. `auto` means dxvk when a Vulkan device can be created, otherwise `wined3d-sw` (`__GLX_VENDOR_LIBRARY_NAME=mesa LIBGL_ALWAYS_SOFTWARE=1`), which touches no NVIDIA channel (0 NVRM lines). VERIFIED: Track B boots, loads HARNESS_new_story, launches to space at 68.7 fps average and quits clean (run 20261018-055223-lane1-loadrep-HARNESS_new_story-B-1). `LANES=2` until the GPU is reset. gamescope has been removed from the harness. Every synthetic input passes the PID/desktop/geometry gate (commit 9c6649a on wp/P0-HARNESS).
 - **Input trace:** the likely Steam misclick was an unguarded click at 05:06:48Z (run …050637-lane1-load-HARNESS_new_story-B), before the gate existed.
 - **Decided by:** orchestrator, on P0-HARNESS evidence. A reboot or reset still needs Adam (options offered 00:5x).
+
+## D106 — 2026-10-18 — Branch history that fails check_public: squash-merge; decomp citations move out of code
+- **Context:** P0-REPO fix round 1 tightened the decomp rule: it now matches the reference repo's name loosely in every code file outside docs/. Its sibling scan (`--commits=main..wp/*`) finds:
+  - wp/P0-REPO's own early commits (95db516, 257ef54), whose old checker spelled the name literally;
+  - code comments in wp/P0-DATATOOLS (`tools/fltools/hash.py`, `ini.py`) and wp/P0-HARNESS (`harness/fixtures/flhash.py`, `gen_fixture.py`) citing the decompilation as a reference.
+
+  The pre-push hook checks every commit being pushed, and AUTONOMY forbids rewriting main.
+- **Options:**
+  - (a) narrow the rule to allow citations in code;
+  - (b) packages move citations out of code;
+  - (c) packages rewrite their own branches;
+  - (d) the orchestrator squash-merges any branch whose intermediate history fails `--commits`.
+- **Choice:** (b) + (d).
+  - Code comments say "see NOTES.md §x" instead. Citations of reference sources live in the package's NOTES.md or docs. The rule stays strict, so copied decomp headers are still caught.
+  - Merges stay `--no-ff` by default (BUILD_PLAN §5). When `check_public --commits=main..wp/<ID>` fails only on intermediate commits and the tip is clean, the orchestrator uses `git merge --squash` + a commit named `merge <ID>: <title> (squashed: intermediate history failed check_public)`.
+  - The wp branch stays local for reference (never pushed).
+  - This is not a rewrite of main.
+- **Why:** keeps the strongest leak gate without blocking the first push, and needs no history rewriting on main.
+- **Decided by:** orchestrator
