@@ -95,7 +95,7 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 | aa760a6d5172501fc | P0-HARNESS | impl (a1 cont.) | 2026-10-18T01:44 | from a5bafe5 |
 | aeb69a8aaddaa49db | P0-DATATOOLS | impl (fix r1 cont.) | 2026-10-18T01:44 | from 463eb68 |
 | ae243e39aecae6681 | P0-SIDECAR | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE ~02:09 @ 75da0e4 (idle; resume via SendMessage for fix r2) |
-| (pending) | P0-SIDECAR | review r2 | 2026-10-18T02:10 | |
+| a0a202af5ab1a8be0 | P0-SIDECAR | review r2 | 2026-10-18T02:10 | |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
