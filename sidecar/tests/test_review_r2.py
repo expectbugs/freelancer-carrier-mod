@@ -7,6 +7,8 @@ critical_hull doc. The play-port test hardening lives with the original tests in
 from __future__ import annotations
 
 import asyncio
+import socket
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -375,3 +377,124 @@ def test_unknown_type_warnings_are_capped(fakegame):
 def test_critical_hull_doc_names_the_cap():
     doc = protocol.POLICY_FIELDS["critical_hull"].doc
     assert "min(bots_hull_below, 0.95)" in doc and "[floor, 0.95]" not in doc
+
+
+# ---- connection cap counts only live hello-less connections (review r2b note) ------------------
+def _burst_then_game(port: int, n: int, started: threading.Event) -> bytes:
+    """n connections that close without a word, then a game that says hello. Returns what the game
+    got back (b"" = refused). Plain blocking sockets, in a thread."""
+    started.set()
+    for _ in range(n):
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as s:
+        s.sendall(b'{"v":1,"t":"hello","seq":1,"gt":0,"dll":"t","game":"t"}\n')
+        try:
+            return s.recv(4096)
+        except OSError:
+            return b""
+
+
+@pytest.mark.parametrize("trial", range(2))
+def test_connect_close_burst_does_not_refuse_the_next_game(trial):
+    """The server is busy (its loop blocked) while 50 peers connect and close and a game connects.
+    When the loop runs again it accepts them all in one batch, before it has read their EOFs."""
+    async def body():
+        async with running_app() as (app, port):
+            started = threading.Event()
+            fut = asyncio.ensure_future(asyncio.to_thread(_burst_then_game, port, 50, started))
+            await asyncio.sleep(0)
+            assert started.wait(2)
+            time.sleep(0.5)  # block the loop on purpose: everything queues in the listen backlog
+            reply = await asyncio.wait_for(fut, 5.0)
+            assert b'"t":"welcome"' in reply, (reply, app.server.stats.refused)
+    run(body())
+
+
+def test_cap_still_refuses_live_hello_less_connections():
+    hello = b'{"v":1,"t":"hello","seq":1,"gt":0,"dll":"t","game":"t"}\n'
+
+    async def body():
+        async with running_app() as (app, port):
+            cap = server_mod.MAX_PENDING_CONNECTIONS
+            idle = [await asyncio.open_connection("127.0.0.1", port) for _ in range(cap)]
+            await until(lambda: len(app.server.sessions) == cap, what="the waiting sessions")
+            r5, w5 = await asyncio.open_connection("127.0.0.1", port)
+            assert await asyncio.wait_for(r5.read(), 2.0) == b""  # refused: closed at once
+            assert app.server.stats.refused == 1
+            w5.close()
+            r1, w1 = idle[0]  # one of the waiting peers says hello and gets its welcome
+            w1.write(hello)
+            assert b'"t":"welcome"' in await asyncio.wait_for(r1.readline(), 2.0)
+            r6, w6 = await asyncio.open_connection("127.0.0.1", port)  # a slot is free again
+            w6.write(hello)
+            assert b'"t":"welcome"' in await asyncio.wait_for(r6.readline(), 2.0)
+            assert app.server.stats.refused == 1
+            for _, w in (*idle, (r6, w6)):
+                w.close()
+    run(body())
+
+
+# ---- stall edges keep a held press (review r2b; ipc.md §4.7.1, §4.7.7) -------------------------
+@pytest.mark.parametrize("release_before_resume", [False, True])
+def test_press_held_across_a_stall_gives_one_utterance(fakegame, release_before_resume):
+    async def body():
+        async with running_app() as (app, port):
+            g, mic = await _session(app, fakegame, port)
+            sess = await app.server.wait_for_session()
+            await g.ptt(True)
+            await g.send("ev.pause", on=True, stall=True)  # the watchdog: a >= 1 s frame hitch
+            await _sync(g)
+            assert sess.tick == "stopped"  # a stall still stops the tick (ack timers suspended)
+            if release_before_resume:
+                await g.ptt(False)
+                await g.send("ev.pause", on=False, stall=True)
+            else:
+                await g.send("ev.pause", on=False, stall=True)
+                await g.ptt(False)
+            await g.expect({"t": "policy.set"}, timeout=3)
+            await g.ack()
+            await g.expect({"t": "say"})
+            await g.ack()
+            await until(lambda: app.pipeline.utterances == 1, what="utterance")
+            await g.expect_silence(0.2)
+            p = app.pipeline
+            assert p.utterances == 1 and p.cancelled == 0 and p.ignored_ptt == 0 and "cancel" not in mic.events
+            await g.close()
+    run(body())
+
+
+@pytest.mark.parametrize("pause", [{"on": True}, {"on": True, "stall": False}])
+def test_press_across_a_real_pause_gives_none(fakegame, pause):
+    async def body():
+        async with running_app() as (app, port):
+            g, mic = await _session(app, fakegame, port)
+            await g.ptt(True)
+            await g.send("ev.pause", **pause)
+            await g.send("ev.pause", on=False)
+            await g.ptt(False)  # unmatched: the press was cancelled at the pause edge
+            await g.expect_silence(0.4)
+            p = app.pipeline
+            assert p.utterances == 0 and p.cancelled == 1 and p.ignored_ptt == 1 and mic.events[-1] == "cancel"
+            await g.close()
+    run(body())
+
+
+@pytest.mark.parametrize("edge", [{"t": "ev.menu", "stall": True},
+                                  {"t": "ev.load", "save": "slot2", "stall": True}])
+def test_stall_flag_on_other_events_is_ignored(fakegame, edge):
+    async def body():
+        async with running_app() as (app, port):
+            g, mic = await _session(app, fakegame, port)
+            await g.ptt(True)
+            await g.send(edge)
+            await _sync(g)
+            assert app.pipeline.cancelled == 1 and mic.events[-1] == "cancel"
+            await g.close()
+    run(body())
+
+
+def test_ev_pause_stall_is_an_optional_bool():
+    assert validate(_env("ev.pause", on=True, stall=True)) == []
+    assert validate(_env("ev.pause", on=False, stall=False)) == []
+    assert any("stall" in e for e in validate(_env("ev.pause", on=True, stall="yes")))
+    assert any("stall" in e for e in validate(_env("ev.pause", on=True, stall=1)))

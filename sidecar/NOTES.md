@@ -260,6 +260,31 @@ The fakegame's `handshake()` now reports a running tick after `welcome`, like th
 
 check_public (snapshot): `--tree` OK (152 files); `--commits=main..HEAD` OK.
 
+## Review r2b (2026-10-18)
+
+The polish check (`state/reports/P0-SIDECAR-r2b.md`) passed with one MINOR, plus a note from the reviewer's out-of-process canary.
+
+- **D36 stall edges are marked (one source of truth).** A watchdog-only edge is `ev.pause{on:true, stall:true}`, and its resume repeats `stall:true`. The DLL keeps a press held across a stall and sends the normal release afterwards. The sidecar does not cancel a held press on a stall edge; it still does on a real pause, `ev.menu` and `ev.load`. A stall still stops the tick, so ack timers are suspended. `stall` means something only on `ev.pause`; elsewhere it is an unknown field (ipc.md §4.7.1, §4.7.7, §7.2 `ev.pause`).
+  Tests: `test_press_held_across_a_stall_gives_one_utterance[*]` (press → stall → release, either side of the resume: exactly one utterance), `test_press_across_a_real_pause_gives_none[*]`, `test_stall_flag_on_other_events_is_ignored[*]`, `test_ev_pause_stall_is_an_optional_bool`.
+
+#### B-6: a game is refused right after a burst of connect/close peers
+
+Observation (reviewer, out of process): after 50 connections that close at once, the canary's connection was refused in 4 of 6 trials, and got a pong 0.1 s later in 6 of 6. In process, the burst did not reproduce while the loop was idle. It did reproduce, 5 of 5, when the server loop was blocked for 0.5 s during the burst.
+Hypotheses:
+1. A busy loop accepts the whole backlog in one batch, and the new connections' `_on_client` tasks run before the selector has delivered the EOFs of peers that already left. The cap then counts dead sockets. **Fits all observations.**
+2. `Session.closing` is set only once the read loop runs, so a session whose EOF has arrived but not been processed still counts.
+3. A refused connection's `writer.close()` is slow, and refusals pile up.
+4. The 5 s handshake timer keeps dead sessions in `sessions`.
+5. The kernel listen backlog (100) overflows and drops the canary's SYN. Disproven: the canary connected and got EOF, so it was accepted.
+6. `_session_finished` does not run for sessions that never said hello.
+7. The asyncio `_accept_connection` batch limit reorders accepts.
+8. GIL contention from the burst thread starves the loop (it only changes timing).
+9. The cap is simply too small for a reconnect storm (4).
+10. The DLL's reconnect itself could produce such a burst. Unlikely: its backoff is at least 1 s.
+
+Experiment: count only sessions whose reader is not at EOF. Alone it still failed 5 of 5, because the EOFs had not been delivered yet (consistent with 1, and it refutes 2 as the sole cause). One `await asyncio.sleep(0)` before counting passes 20 of 20. Fix: yield once, then count sessions that are not handshaken, not closing and not at EOF.
+Tests: `test_connect_close_burst_does_not_refuse_the_next_game[*]` (it fails on 824564a). `test_cap_still_refuses_live_hello_less_connections` checks that the cap still works: a 5th idle peer is refused, and a slot frees up after a hello.
+
 ## RESUME POINT
 
-The review r2 polish is complete and committed on `wp/P0-SIDECAR`: all 5 MINORs are closed, with tests and evidence. Nothing is pending in this package. Next: the merge after P0-REPO (ci.sh and the hooks); the ARCH-0 freeze of `docs/spec/ipc.md`.
+Review r2b is complete and committed on `wp/P0-SIDECAR` (stall edges, connection cap). Nothing is pending in this package. Next: the merge after P0-REPO (ci.sh and the hooks); the ARCH-0 freeze of `docs/spec/ipc.md`.

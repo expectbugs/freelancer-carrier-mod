@@ -587,7 +587,11 @@ class SidecarServer:
 
     async def _on_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.stats.connections += 1
-        pending = [s for s in self.sessions if not s.handshaken and not s.closing]
+        # Count only live hello-less connections. A busy loop accepts a whole backlog in one batch,
+        # before it has read the EOFs of peers that already left: one yield lets them arrive
+        # (NOTES.md B-6).
+        await asyncio.sleep(0)
+        pending = [s for s in self.sessions if not s.handshaken and not s.closing and not s.reader.at_eof()]
         if len(pending) >= MAX_PENDING_CONNECTIONS:
             self.stats.refused += 1
             log.warning("too many connections without hello; refusing")

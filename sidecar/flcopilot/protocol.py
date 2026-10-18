@@ -269,9 +269,12 @@ MESSAGES: dict[str, Msg] = {
     "ev.menu": Msg(G2S, EVENT, {}, doc="returned to the main menu (no ship, no game loaded)"),
     "ev.load": Msg(G2S, EVENT, {"save": _name(True), "char": _name(nullable=True)}),
     "ev.save": Msg(G2S, EVENT, {"save": _name(True)}),
-    "ev.pause": Msg(G2S, EVENT, {"on": F("bool", required=True,
-                                         doc="true = the game tick (the simulation step) stopped; one edge "
-                                             "for every overlapping reason")}),
+    "ev.pause": Msg(G2S, EVENT, {
+        "on": F("bool", required=True,
+                doc="true = the game tick (the simulation step) stopped; one edge for every overlapping reason"),
+        "stall": F("bool", doc="the edge comes from the 1 s stall watchdog alone (a frame hitch); a held "
+                               "push-to-talk press is not cancelled; a resume repeats its pause edge's value"),
+    }),
     "ptt": Msg(G2S, EVENT, {
         "down": F("bool", required=True),
         "reason": F("str", enum=PTT_CANCEL_REASONS,

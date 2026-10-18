@@ -101,11 +101,17 @@ class VoicePipeline:
 
     def on_tick_edge(self, session, msg: dict) -> None:
         """Backstop for a lost cancel: the tick stopping (ev.pause{on:true}), the main menu and a
-        load each cancel a press that is still held (ipc.md §4.7)."""
+        load each cancel a press that is still held (ipc.md §4.7.7). A stall edge
+        (ev.pause{on:true, stall:true}) is a frame hitch, not a player action: the DLL keeps the press
+        and sends its release later, so the press stays held here too (§4.7.1)."""
         if session is not self._session or not self._pressed:
             return
-        if msg["t"] == "ev.pause" and not msg["on"]:
-            return
+        if msg["t"] == "ev.pause":
+            if not msg["on"]:
+                return
+            if msg.get("stall") is True:
+                log.info("stall edge; ptt press kept", extra={"kv": {"sid": session.sid}})
+                return
         self._cancel_press(session, msg["t"])
 
     async def _utterance(self, session, t_up: float) -> None:
