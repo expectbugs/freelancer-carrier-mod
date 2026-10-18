@@ -7,7 +7,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-1/2 disposable; lane-6/7/8 leftovers HARNESS may delete). **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T02:03 (P0-REPO and P0-TOOLCHAIN in r2 review; HARNESS, DATATOOLS, SIDECAR running)
+- **Last update:** 2026-10-18T02:10 (REPO, TOOLCHAIN, SIDECAR in r2 review; HARNESS, DATATOOLS running)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
@@ -27,7 +27,7 @@ W4-ESC-* and FIX-* rows are appended when created.
 | P0-TOOLCHAIN | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-TOOLCHAIN @ 0bceb22 | | fix r1 DONE (f1 report): -mstackrealign, EH probe 24/3/0 both tracks+CRTs, ci 10/20/50 PASS; CRT recommendation: builtin by default, native as TRACK-A fallback; r2 reviewer running |
 | P0-HARNESS | 0 | impl | — | RUNNING (a1 continued) | 1 | wp/P0-HARNESS @ a5bafe5 | | report state/reports/P0-HARNESS-a1.md; RESUME POINT at top of harness/NOTES.md; first after reboot: Track A DXVK boot + dacom stricmp crash triage, concurrency, spew allow-lists, vdesk input gate |
 | P0-DATATOOLS | 0 | impl | — | FIXING | 1 | wp/P0-DATATOOLS @ 463eb68 | | r1 fix round 1 ~half done (MAJOR1 done; MAJOR2/3 code done, tests missing; hygiene+validator MINORs not started); RESUME POINT in tools/fltools/NOTES.md |
-| P0-SIDECAR | 0 | impl | — | FIXING | 1 | wp/P0-SIDECAR @ dbc1c9f | | r1 fix round 1 partly done; RESUME POINT in sidecar/NOTES.md (tests for pause/late-ack/ptt-cancel/ports/brain/critical_hull, README port, CUDA smoke re-run) |
+| P0-SIDECAR | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-SIDECAR @ 75da0e4 | | fix r1 DONE (f1 report): 306 tests x20 clean; CUDA voice_smoke PASS (stt 131 ms, tts first audio 374 ms); open proposal D7: lane.sh exports FLCOPILOT_FORCE_TEST_PROFILE=1; r2 reviewer running |
 | P0-TRACK-A | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | P0-TRACK-B | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | S-BASE | 0 | spike | G0a, P0-DATATOOLS | TODO | 0 | | | |
@@ -94,7 +94,8 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 | a3ce63ff4e332397d | P0-TOOLCHAIN | review r2 | 2026-10-18T02:03 | |
 | aa760a6d5172501fc | P0-HARNESS | impl (a1 cont.) | 2026-10-18T01:44 | from a5bafe5 |
 | aeb69a8aaddaa49db | P0-DATATOOLS | impl (fix r1 cont.) | 2026-10-18T01:44 | from 463eb68 |
-| ae243e39aecae6681 | P0-SIDECAR | impl (fix r1 cont.) | 2026-10-18T01:44 | from dbc1c9f |
+| ae243e39aecae6681 | P0-SIDECAR | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE ~02:09 @ 75da0e4 (idle; resume via SendMessage for fix r2) |
+| (pending) | P0-SIDECAR | review r2 | 2026-10-18T02:10 | |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
