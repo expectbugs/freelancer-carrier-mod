@@ -201,3 +201,9 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
   - Host-service and device names stay out of committed files, `state/` included; the two existing mentions were reworded at the tip (history is not rewritten, AUTONOMY §2). Blocklist entry for the phone host converted to the `w:` whole-word form.
 - **Why:** unblock the build without leaving a weak escape in place when authored data starts flowing; keep data formats clean; minimise personal details in a public repo.
 - **Decided by:** orchestrator
+
+## D113 — 2026-10-18 — Harness host tests join CI stage 30; P0-HARNESS follow-up branch
+- **Context:** P0-HARNESS r2 PASS with 4 MINORs (lock-order inversion between `baseline.sh fluf-init` and Track A `--input` lanes; selftest DLL rebuilt only if missing; runner window search trusts `_NET_WM_PID`; test_lanes not parallel-safe). The reviewer noted the 138 harness tests run only through `selftest.sh`, because no CI stage covers `harness/tests` in Phase 0.
+- **Choice:** merge HARNESS now (squash, D106) to start the bake-off; fix the MINORs on `wp/P0-HARNESS-b` (same agent, from main), reviewed by the r2 reviewer, merged `--no-ff`. The follow-up also adds `harness/tests` as a root of CI stage 30 (`harness/ci.d/30-pytest.sh`, ownership passes from P0-DATATOOLS to the orchestrator-approved edit here; W1-HARNESS owns it from Wave 1), with the tests that need lanes, X or Wine skipping cleanly when those aren't available.
+- **Why:** the bake-off is the critical path; the lock-order bug only bites during a baseline re-init, which the track packages don't run. Harness regressions should fail CI, not wait for a manual selftest.
+- **Decided by:** orchestrator

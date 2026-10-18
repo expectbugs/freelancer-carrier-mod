@@ -48,7 +48,7 @@ KNOWN ISSUES: …
 
 - **Attempt:** 1 (no previous attempt).
 - **Track:** this IS the bake-off; the track is decided at G0a from your RESULTS.md and the sibling's.
-- **Main at spawn:** `{{MAIN_SHA}}` (P0-REPO, P0-TOOLCHAIN, P0-HARNESS, P0-DATATOOLS and P0-SIDECAR merged; check `git log --oneline -8 main`). Create `wp/P0-TRACK-A` from main in your worktree.
+- **Main at spawn:** `b13db01` (P0-REPO, P0-TOOLCHAIN, P0-HARNESS, P0-DATATOOLS and P0-SIDECAR merged; check `git log --oneline -8 main`). Create `wp/P0-TRACK-A` from main in your worktree.
 - **Base plan:** undecided (S-BASE / G0b). **Frozen contracts:** none yet; `docs/plan/CONVENTIONS.md` is binding.
 - **Parallel sibling:** P0-TRACK-B runs at the same time in its own worktree. The common header `spike_platform.hpp` and `harness/scenarios/bakeoff_vmstat.yaml` must be byte-identical between you; whoever commits the yaml first, the other copies it verbatim (the orchestrator checks both at merge).
 - **Lanes:** `LANES=4` on DXVK (measured by P0-HARNESS: ~195 fps each with 4 games). You share them with P0-TRACK-B: hold **at most 2 lanes at a time**, release promptly, and use `--perf` only for timing-sensitive measurements. `--input` for any focus or synthetic input (always through the harness input gate: PID, `_NET_WM_DESKTOP`, geometry; never `xdotool key --window`; never switch desktops; D104).

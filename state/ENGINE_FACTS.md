@@ -54,6 +54,41 @@ Format:
 - Notes / how to use: the CPU fallback is far too slow for push-to-talk; W1-SIDECAR must require CUDA for live voice or degrade to text.
 
 
+## EF-007 — Track B (HDE intact + our dacom DLL) boots on DXVK, loads generated fixture saves via the devbridge, launches to space; 4 concurrent lanes run at 60 fps each with `d3d9.maxFrameRate = 60`
+- Status: VERIFIED
+- Evidence: P0-HARNESS selftest runs `$FLMOD_TESTRUNS/20261018-085758-selftest`, `20261018-091057-selftest` (b_smoke, b_eagle, b_fp9, b_longcmd, concurrent); mixed-load `mixload-cap60-*` (12/12 PASS, GPU ≤ 48 %); harness/NOTES.md N11, N16, N17
+- Source package: P0-HARNESS (attempt 1), 2026-10-18
+- Notes / how to use: Proton 11's DXVK 3.1.1 has no `DXVK_FRAME_RATE`; use `d3d9.maxFrameRate` in dxvk.conf. Renderer classes (DXVK vs wined3d-sw) never mix on the host.
+
+## EF-008 — Track A (HDE minus the FLUF-forbidden DLLs, plus FLUF core) boots to the menu but crashes ~2 s after it whenever any `.fl` file is in the save folder (`dacom.dll+0x5e6c`, a stricmp); the same install without FLUF.dll is fine
+- Status: VERIFIED (15 runs)
+- Evidence: harness/NOTES.md N7; runs `…-n7-*`; r1/r2 reviews reproduced E8/M0 CRASH and T1 (no FLUF) PASS
+- Source package: P0-HARNESS (attempt 1), 2026-10-18
+- Notes / how to use: blocks bake-off item 2 on Track A; owned by P0-TRACK-A (D109). Track A also needs vdesk mode (FLUF ignores `windowsize` in x11 mode and covers the screen; the vdesk window sometimes opens fullscreen under concurrent starts, N19, recovered by the runner).
+
+## EF-009 — On Track A the frame function at `0x5B2890` already begins with a jump (FLUF's own detour)
+- Status: VERIFIED
+- Evidence: P0-HARNESS devbridge log `…-064006-…-E1`
+- Source package: P0-HARNESS (attempt 1), 2026-10-18
+- Notes / how to use: don't detour it on Track A; use FLUF's tick facilities. On Track B the selftest DLL hooks it.
+
+## EF-010 — `xdotool search --pid P --name N` ORs the two conditions; `_NET_WM_PID` can be forged by any X client
+- Status: VERIFIED
+- Evidence: `p0-harness-evidence/xdotool_search_pid_probe.txt`; r1 review T4b/T6b (forged xmessage); r2 review (refused via X-Resource)
+- Source package: P0-HARNESS (attempt 1), 2026-10-18
+- Notes / how to use: identify windows per window, and confirm the creator pid through X-Resource (harness/lib/xinput.py `xres_pid`).
+
+## EF-011 — Attaching winedbg to the WoW64 game kills it (crash at `0xFFF40E50`); `bt all` text backtraces work; clean quits end with a handled access violation near the end of wine.log and exit code 0
+- Status: VERIFIED
+- Evidence: harness/NOTES.md N18; `…-083528-lane1-dumptest-manual`; r2 review (winedbg rc=255)
+- Source package: P0-HARNESS (attempt 1), 2026-10-18
+- Notes / how to use: crash triage relies on the text backtrace; a trailing handled AV after `quit` with exit 0 is normal.
+
+## EF-012 — `pub::Player::GetRank` returns the in-game rank (38 and 1 read from fixture saves)
+- Status: VERIFIED
+- Evidence: selftest b_eagle / b_fp9 (`state` reports rank)
+- Source package: P0-HARNESS (attempt 1), 2026-10-18
+
 ## Research claims queued for verification (from local/research)
 
 | Claim | Research source | Verified by |
