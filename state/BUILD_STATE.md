@@ -95,7 +95,7 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 | a3ce63ff4e332397d | P0-TOOLCHAIN | review r2 | 2026-10-18T02:03 | DONE 02:38: CHANGES_REQUIRED (state/reports/P0-TOOLCHAIN-r2.md) |
 | aa760a6d5172501fc | P0-HARNESS | impl (a1 cont.) | 2026-10-18T01:44 | from a5bafe5 |
 | aeb69a8aaddaa49db | P0-DATATOOLS | impl (fix r1 cont.) | 2026-10-18T01:44 | f1 + D107 DONE @ 8eb78e3 (idle) |
-| (pending) | P0-DATATOOLS | review r2 | 2026-10-18T02:47 | |
+| a1a1514f6667c4372 | P0-DATATOOLS | review r2 | 2026-10-18T02:47 | |
 | ae243e39aecae6681 | P0-SIDECAR | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE ~02:09 @ 75da0e4 (idle; resume via SendMessage for fix r2) |
 | a0a202af5ab1a8be0 | P0-SIDECAR | review r2 | 2026-10-18T02:10 | |
 
