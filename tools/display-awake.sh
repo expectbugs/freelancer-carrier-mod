@@ -4,6 +4,12 @@
 # State dir defaults to $FLMOD_LOCAL; tests MUST set DISPLAY_AWAKE_STATE_DIR to a temp dir (never touch the live state).
 set -u
 export DISPLAY="${DISPLAY:-:0}"
+# tmux-launched sessions may lack the XFCE session bus; borrow it from the running screensaver (read-only /proc lookup)
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+  _ssp=$(pgrep -u "$(id -u)" -x xfce4-screensav | head -1)
+  [ -n "$_ssp" ] && DBUS_SESSION_BUS_ADDRESS=$(tr '\0' '\n' < "/proc/$_ssp/environ" 2>/dev/null | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p' | head -1)
+  [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && export DBUS_SESSION_BUS_ADDRESS
+fi
 ST="${DISPLAY_AWAKE_STATE_DIR:-/home/user/freelancer/carrier-mod/local}"
 BAK="$ST/display-settings.bak"
 PIDF="$ST/display-inhibit.pid"
@@ -28,6 +34,7 @@ case "${1:-status}" in
       setsid -f bash -c 'echo $$ > "$1"; exec xfce4-screensaver-command --inhibit -n flbuild -r "autonomous Freelancer mod build"' _ "$PIDF" >/dev/null 2>&1
       sleep 1
     fi
+    xfce4-screensaver-command -d >/dev/null 2>&1 || true   # un-blank if it was already running
     inhibitor_alive && echo "display-awake: ON (inhibitor pid $(cat "$PIDF"); settings saved in $BAK)" || echo "display-awake: ON (xset only; inhibitor failed to start)" ;;
   stop)
     inhibitor_alive && kill "$(cat "$PIDF")" 2>/dev/null; rm -f "$PIDF"

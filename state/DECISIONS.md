@@ -95,3 +95,10 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
   - The Nomad boss respawns; the unlock happens once.
   - Level gating is removed for all equipment.
 - **Decided by:** Adam (accepted the orchestrator's defaults)
+
+## D100 — 2026-10-17 — display-awake.sh: borrow the XFCE session bus
+- **Context:** Under tmux the orchestrator's shell had no `DBUS_SESSION_BUS_ADDRESS`, so `xfce4-screensaver-command --inhibit` failed ("Screensaver is not running") and the slideshow screensaver was active on `:0`.
+- **Options:** (a) rely on `xset` only; (b) read the bus address of the running `xfce4-screensaver` from `/proc/<pid>/environ` (read-only) when unset, and un-blank with `-d` on start.
+- **Choice:** (b). Verified: `xfce4-screensaver-command -q` → inactive, inhibited by `flbuild`. Screen lock is disabled in xfconf (`/lock/enabled false`).
+- **Why:** an active screensaver window would cover lane windows for screenshots and synthetic input.
+- **Decided by:** orchestrator

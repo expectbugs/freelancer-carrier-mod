@@ -1,4 +1,4 @@
-BUILD_STATUS: NOT_STARTED
+BUILD_STATUS: IN_PROGRESS
 <!-- First line is machine-read by tools/watchdog.sh. Values: NOT_STARTED | IN_PROGRESS | COMPLETE | HALTED | STOPPED -->
 
 # Build ledger (orchestrator-owned; update after every state change, commit at least per merge/gate)
