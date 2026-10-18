@@ -67,3 +67,28 @@ Freelancer.exe or FLServer.exe (UNVERIFIED: the exact failing call was not trace
 behaviour, not a loader/ABI fault in hello_a. Not required by the spec; the in-game load of a FLUF module is P0-TRACK-A's
 first checklist item. The static proof stands: all 189 FLUF.dll imports of hello_a resolve against the shipped
 FLUF.dll's export table (check_imports).
+
+## Decisions (attempt 1, 2026-10-17; copied into the report for state/DECISIONS.md)
+
+1. MSVC CRT/STL **14.51** + SDK **10.0.28000** (xwin `--manifest-version 18`, VS 2026 18.11) instead of xwin's
+   default 14.44: FLUF's prebuilt static libs carry `/FAILIFMISMATCH:"annotate_optional=0"`, which only the v145
+   STL emits, so FLUF was built with a 14.5x STL and our final link needs at least that. Channel manifest copy
+   pinned in `/home/user/opt/xwin-cache-18/pinned/`.
+2. GitHub inputs are fetched as commit archive tarballs with sha256 pins (not git clones): simpler, cacheable for
+   offline re-runs, and no git repos inside the shared vendor tree.
+3. Dear ImGui `v1.92.9b-docking`, not the 3-day-old `v1.93.0`. doctest v2.5.3, MinHook v1.3.4, nlohmann 3.11.3.
+4. `LIBUUID_CPP20_OR_GREATER` added to the FLUF define set (stduuid `<span>` selection; needed to compile).
+5. Track B ImGui gets `IMGUI_DISABLE_WIN32_DEFAULT_IME_FUNCTIONS` so it never imports `imm32.dll` (outside the
+   import allowlist; IME is irrelevant here).
+6. Both tracks share one Win32 define set (`flmod::win32_defs` = the Win32 subset of FLUF's must-match list), so
+   code behaves the same whichever track Gate 0a picks.
+7. `check_imports.py` goes beyond the spec: delay imports, i386 check, `api-ms-win-crt-*` against `ucrtbase.dll`,
+   Freelancer DLL imports against the game's own DLLs, FLUF imports against the pinned FLUF.dll.
+8. Directory discovery by glob (`src/module/*/`, `spikes/*/`, `harness/devbridge/`) with self-guards
+   (`flmod_track_only`, `flmod_win32_only`, `flmod_host_only`); feature packages never edit the root CMake.
+9. `hello_b` builds only in `win32-trackB`, `hello_a` only in `win32-trackA`, `loadtest` in both.
+   CI stage 10 builds both win32 tracks while `FLMOD_TRACK` is unset.
+10. `flmod::flsdk_static` (FLSDK's own sources, our compiler) for Track B; Track A links FLUF's prebuilt
+    `FreelancerSDK.lib`.
+11. Vendor trees are chmod read-only after extraction.
+12. DLLs keep DWARF (`/DEBUG:DWARF`) for `winedbg --gdb`; no stripped variant yet.
