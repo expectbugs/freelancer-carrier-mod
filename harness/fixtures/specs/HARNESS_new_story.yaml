@@ -1,0 +1,9 @@
+# Vanilla story state (Mission_01a) at rank 1, docked at Manhattan. Smoke / pre-mod init / level-gating control.
+name: HARNESS_new_story
+summary: newplayer.fl story state, rank 1, docked at Manhattan (system and base set explicitly)
+story_mode: true
+rank: 1
+system: Li01
+base: Li01_01_Base
+room: start_room
+ship: template          # keep newplayer.fl's ship, equipment and cargo (validated against the install)

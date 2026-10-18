@@ -1,0 +1,12 @@
+# D-2.1 level-gating test: rank 1, 5M credits, friendly with Freeport 9's owner, docked at Freeport 9.
+name: HARNESS_lvl1_rich_fp9
+summary: rank 1, 5,000,000 credits, owner-faction rep >= 0.6, docked at Freeport 9, post-campaign gates
+post_campaign: true      # gates open + no story mission; rank stays 1 (set below)
+rank: 1
+money: 5000000
+system: Ew04
+base: Ew04_01_Base
+room: start_room
+ship: template
+reps_owner_min:
+  - {base: Ew04_01_Base, min: 0.65}   # owner = `reputation` of the Ew04 object with base = Ew04_01_Base

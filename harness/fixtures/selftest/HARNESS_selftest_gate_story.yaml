@@ -1,0 +1,9 @@
+# selftest.sh control for HARNESS_selftest_gate_post: story state (Li01_to_Li02 still locked), same position.
+name: HARNESS_selftest_gate_story
+extends: HARNESS_new_story
+summary: story state 800 m from Li01_to_Li02 (gate must stay locked)
+system: Li01
+base: null
+room: null
+pos: {near: Li01_to_Li02, standoff: 800, direction: [0, 0, 1]}
+rotate: [0, 0, 0]

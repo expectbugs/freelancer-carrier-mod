@@ -1,0 +1,21 @@
+# Post-campaign endgame Eagle docked at Manhattan: the default fixture for gameplay scenarios.
+name: HARNESS_endgame_eagle
+summary: post-campaign Eagle, Nomad guns, best class-10 shield, max bots/batteries, 60M credits, Manhattan
+post_campaign: true      # Mission_13 / MissionNum 42, M13 enter_bar reps, no player locked_gate lines
+rank: 38
+money: 60000000
+system: Li01
+base: Li01_01_Base
+room: start_room
+ship:
+  archetype: ge_fighter6
+  base_loadout: package  # engine, power, scanner, tractor, lights: the ship's goods package, read at generation time
+  shield: {best_class: 10}
+  guns:
+    prefer: [special_nomad_gun01, special_nomad_gun02, special_nomad_gun03]
+    fill: all_gun_hardpoints
+cargo:
+  - {item: ge_s_repair_01, count: max}     # max = the ship's nanobot_limit
+  - {item: ge_s_battery_01, count: max}    # max = the ship's shield_battery_limit
+reps_default_min: 0.65   # "broadly friendly": every faction below this is raised to it ...
+reps_default_except: [fc_n_grp, fc_ln_grp, fc_kn_grp, fc_rn_grp]   # ... except the Nomads and the possessed navies

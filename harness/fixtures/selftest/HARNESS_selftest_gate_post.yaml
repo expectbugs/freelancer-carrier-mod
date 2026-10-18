@@ -1,0 +1,10 @@
+# selftest.sh post-campaign gate check: endgame Eagle in space 800 m from the Li01_to_Li02 jump gate, which the
+# story locks early (newplayer.fl locked_gate). Post-campaign fixtures drop every player locked_gate line.
+name: HARNESS_selftest_gate_post
+extends: HARNESS_endgame_eagle
+summary: post-campaign Eagle 800 m from Li01_to_Li02 (gate must be passable)
+system: Li01
+base: null
+room: null
+pos: {near: Li01_to_Li02, standoff: 800, direction: [0, 0, 1]}
+rotate: [0, 0, 0]

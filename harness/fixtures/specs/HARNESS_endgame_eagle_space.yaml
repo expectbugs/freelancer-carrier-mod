@@ -1,0 +1,9 @@
+# HARNESS_endgame_eagle in space, about 3 km beyond Manhattan's atmosphere / death zone.
+name: HARNESS_endgame_eagle_space
+extends: HARNESS_endgame_eagle
+summary: endgame Eagle in space about 3 km off Manhattan
+system: Li01
+base: null
+room: null
+pos: {near: Li01_01, standoff: 3000, direction: [0, 0, 1]}
+rotate: [0, 0, 0]

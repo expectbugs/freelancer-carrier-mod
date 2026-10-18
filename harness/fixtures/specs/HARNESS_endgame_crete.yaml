@@ -1,0 +1,7 @@
+# HARNESS_endgame_eagle docked at Planet Crete; Ew06 is one jump away via Hi02_to_Ew06_hole.
+name: HARNESS_endgame_crete
+extends: HARNESS_endgame_eagle
+summary: endgame Eagle docked at Planet Crete
+system: Hi02
+base: Hi02_01_Base
+room: start_room

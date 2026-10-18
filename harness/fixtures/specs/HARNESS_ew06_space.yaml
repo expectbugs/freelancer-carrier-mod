@@ -1,0 +1,10 @@
+# Endgame Eagle in space in Ew06 near the arrival point of the Hi02 jump hole, Nomads hostile (Nomad boss).
+name: HARNESS_ew06_space
+extends: HARNESS_endgame_eagle
+summary: endgame Eagle in Ew06 near Ew06_to_Hi02_hole, Nomads hostile
+system: Ew06
+base: null
+room: null
+pos: {near: Ew06_to_Hi02_hole, standoff: 1500, direction: [0, 0, 1]}
+rotate: [0, 0, 0]
+reps: {fc_n_grp: -0.9}

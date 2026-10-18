@@ -1,0 +1,7 @@
+# FLSpew allow-list: one Python regex per line, re.search against the normalized line.
+# Format and regeneration: harness/baseline/README.md
+# generated 2026-10-18T07:16:06Z by harness/lib/spew_allow.py build from 3 spew file(s)
+^.*NewStream\.cpp\(\d+\) : ERROR:General:StreamingSound: missing MP3 codec\?$
+^.*rp_dx8\.cpp\(\d+\) : WARNING:General:set_gamma_function\(\) called outside of create_buffers/destroy_buffers$
+^.*wavlib\.cpp\(\d+\) : ERROR:General:StreamingSound: missing MP3 codec\?$
+^.*Script\.cpp\(\d+\) : \*\*\* ERROR: Player hardpoint is missing, so script cannot connect to the player\.$

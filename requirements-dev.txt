@@ -4,3 +4,5 @@
 pytest>=9.1,<10
 PyYAML>=6.0.3,<7
 jsonschema>=4.26,<5
+# P0-HARNESS: X-Resource client-pid lookup in the input gate (harness/lib/xinput.py, review r1 m1). Pure Python.
+python-xlib>=0.33,<1
