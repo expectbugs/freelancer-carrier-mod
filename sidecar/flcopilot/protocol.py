@@ -69,6 +69,14 @@ RATE_LIMIT_POLICY_PER_S = 2
 
 PTT_KEYS = {"numpad_period": 110, "numpad_minus": 109}
 
+# Integer widths (ipc.md §3, §5). Every JSON integer anywhere in a line must fit in int64, or the
+# line is malformed. Known fields are narrower: seq, n and obj are uint32, gt is an int64 that a
+# double holds exactly, and every other integer is an int32 within its stated range.
+INT32_MIN, INT32_MAX = -(2 ** 31), 2 ** 31 - 1
+UINT32_MAX = 2 ** 32 - 1
+INT64_MIN, INT64_MAX = -(2 ** 63), 2 ** 63 - 1
+GT_MAX = 2 ** 53 - 1
+
 COMMAND_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
 SPEAKER_RE = re.compile(r"^(copilot|wing:[A-Za-z0-9_-]{1,32})$")
 ACTOR_RE = re.compile(r"^(player|wing:[A-Za-z0-9_-]{1,32}|carrier:[A-Za-z0-9_-]{1,32}|other)$")
@@ -119,7 +127,11 @@ def _frac(required=False, doc=""):
 
 
 def _count(required=False, doc=""):
-    return F("int", required=required, min=0, doc=doc)
+    return F("int", required=required, min=0, doc=doc)  # int32 >= 0
+
+
+def _u32(required=False, nullable=False, doc=""):
+    return F("int", required=required, nullable=nullable, min=0, max=UINT32_MAX, doc=doc)
 
 
 def _name(required=False, nullable=False, doc=""):
@@ -130,7 +142,8 @@ POLICY_FIELDS = {
     "auto_bots": F("bool", doc="reflex may use nanobots"),
     "bots_hull_below": F("num", doc="use nanobots below this hull fraction; DLL clamps to [0.05, 0.95]"),
     "bots_reserve": F("int", doc="nanobots kept back; DLL clamps to [0, max stock]"),
-    "critical_hull": F("num", doc="hard floor; DLL clamps to [floor, 0.95]; may be raised, never lowered below the INI floor"),
+    "critical_hull": F("num", doc="hard floor; DLL clamps to [floor, min(bots_hull_below, 0.95)], floor wins; "
+                                  "may be raised, never lowered below the INI floor"),
     "release_reserve_when": F("str", enum=RELEASE_RESERVE_WHEN, doc="when the reserve may be spent"),
     "auto_batts": F("bool", doc="reflex may use shield batteries"),
     "batts_shield_below": F("num", doc="use batteries below this shield fraction; DLL clamps to [0.05, 0.95]"),
@@ -145,7 +158,7 @@ SHIP_SCHEMA = {
     "system": _name(nullable=True), "base": _name(nullable=True), "near": _name(nullable=True),
 }
 TARGET_SCHEMA = {
-    "obj": F("int", required=True, min=0, doc="space object id (same name as ev.target.obj)"),
+    "obj": _u32(True, doc="space object id, uint32 (same name as ev.target.obj)"),
     "name": _name(), "faction": _name(nullable=True),
     "cls": F("str", enum=SHIP_CLASSES), "hull": _frac(), "shield": _frac(),
     "dist": F("num", min=0.0), "hostile": F("bool"),
@@ -190,8 +203,8 @@ MESSAGES: dict[str, Msg] = {
         "detail": F("str", maxlen=256),
         "supported": F("list", items=F("int", min=1), max_items=8),
     }, doc="the sender closes the connection right after this"),
-    "ping": Msg(BOTH, CONTROL, {"n": F("int", min=0)}),
-    "pong": Msg(BOTH, CONTROL, {"n": F("int", min=0)}),
+    "ping": Msg(BOTH, CONTROL, {"n": _u32()}),
+    "pong": Msg(BOTH, CONTROL, {"n": _u32()}),
     # ---- game -> sidecar: state ----------------------------------------------------------
     "state": Msg(G2S, STATE, {
         "rate": F("str", enum=RATE_TIERS, required=True),
@@ -223,7 +236,7 @@ MESSAGES: dict[str, Msg] = {
         "left": _count(True),
     }),
     "ev.target": Msg(G2S, EVENT, {
-        "obj": F("int", required=True, nullable=True, min=0, doc="space object id; null = target cleared"),
+        "obj": _u32(True, nullable=True, doc="space object id (uint32); null = target cleared"),
         "name": _name(), "cls": F("str", enum=SHIP_CLASSES), "faction": _name(nullable=True),
         "hostile": F("bool"),
     }),
@@ -256,7 +269,9 @@ MESSAGES: dict[str, Msg] = {
     "ev.menu": Msg(G2S, EVENT, {}, doc="returned to the main menu (no ship, no game loaded)"),
     "ev.load": Msg(G2S, EVENT, {"save": _name(True), "char": _name(nullable=True)}),
     "ev.save": Msg(G2S, EVENT, {"save": _name(True)}),
-    "ev.pause": Msg(G2S, EVENT, {"on": F("bool", required=True, doc="true = the game tick stopped")}),
+    "ev.pause": Msg(G2S, EVENT, {"on": F("bool", required=True,
+                                         doc="true = the game tick (the simulation step) stopped; one edge "
+                                             "for every overlapping reason")}),
     "ptt": Msg(G2S, EVENT, {
         "down": F("bool", required=True),
         "reason": F("str", enum=PTT_CANCEL_REASONS,
@@ -322,6 +337,12 @@ def _check_value(path: str, spec: F, value: Any, strict: bool, errors: list[str]
     if t == "int" and not _is_int(value):
         errors.append(f"{path}: expected int")
         return
+    if t == "int":  # width: int32 unless the field says otherwise (uint32 fields set min/max)
+        lo = INT32_MIN if spec.min is None else spec.min
+        hi = INT32_MAX if spec.max is None else spec.max
+        if not lo <= value <= hi:
+            errors.append(f"{path}: {value} outside [{lo}, {hi}]")
+            return
     if t == "num" and not _is_num(value):
         errors.append(f"{path}: expected number")
         return
@@ -383,10 +404,10 @@ def validate_envelope(msg: Any) -> list[str]:
     if not isinstance(t, str) or not t or len(t) > 64:
         errors.append("t: missing or not a non-empty string")
     seq = msg.get("seq")
-    if not _is_int(seq) or seq < 0:
-        errors.append("seq: missing or not an int >= 0")
-    if "gt" in msg and (not _is_int(msg["gt"]) or msg["gt"] < 0):
-        errors.append("gt: not an int >= 0")
+    if not _is_int(seq) or not 0 <= seq <= UINT32_MAX:
+        errors.append("seq: missing or not a uint32")
+    if "gt" in msg and (not _is_int(msg["gt"]) or not 0 <= msg["gt"] <= GT_MAX):
+        errors.append("gt: not an int in [0, 2^53 - 1]")
     if "id" in msg and (not isinstance(msg["id"], str) or not COMMAND_ID_RE.fullmatch(msg["id"])):
         errors.append("id: not a valid command id")
     return errors
@@ -449,7 +470,7 @@ def decode(line: bytes) -> dict:
         raise ProtocolError("utf8", str(exc)) from None
     try:
         obj = json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float,
-                         object_pairs_hook=_no_duplicate_keys)
+                         parse_int=_int64, object_pairs_hook=_no_duplicate_keys)
     except (ValueError, RecursionError) as exc:  # RecursionError: absurdly deep nesting
         raise ProtocolError("json", str(exc)[:200]) from None
     if "\\u" in text and _has_lone_surrogate(obj):
@@ -474,6 +495,16 @@ def _no_duplicate_keys(pairs: list) -> dict:
             raise ValueError(f"duplicate key {key[:40]!r}")
         out[key] = value
     return out
+
+
+def _int64(text: str) -> int:
+    """Integers must fit in int64 anywhere in a line (C++ parsers would lose them)."""
+    if len(text) > 20:  # cheap check first: no int64 has more than 19 digits plus a sign
+        raise ValueError(f"integer {text[:24]}... does not fit in int64")
+    val = int(text)
+    if not INT64_MIN <= val <= INT64_MAX:
+        raise ValueError(f"integer {text} does not fit in int64")
+    return val
 
 
 def _finite_float(text: str) -> float:

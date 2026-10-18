@@ -59,6 +59,8 @@ def test_handler_exception_is_contained(fakegame):
             g = fakegame.FakeGame(port=port)
             await g.connect()
             await g.handshake()
+            await g.send("ping", n=1)  # the state sent after welcome is handled before the patch
+            await g.expect({"t": "pong"})
             with patch("flcopilot.protocol.validate", side_effect=RuntimeError("bug")):
                 await g.send("ev.dock", base="x")
                 await asyncio.sleep(0.05)

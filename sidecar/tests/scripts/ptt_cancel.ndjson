@@ -2,6 +2,7 @@
 // window lost focus), so it sends ptt{down:false, reason}. The sidecar discards that utterance
 // and sends nothing; the next normal press is handled as usual.
 {"expect": {"t": "welcome", "profile": "test"}}
+{"send": {"t": "state", "rate": "calm"}}
 {"ptt": "down"}
 {"sleep": 0.05}
 {"ptt": "cancel", "reason": "focus_lost"}

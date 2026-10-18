@@ -17,7 +17,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -79,12 +79,13 @@ def test_pause_suspends_ack_timeouts_and_keeps_the_heartbeat(fakegame):
             await g.connect()
             await g.handshake()
             sess = await app.server.wait_for_session()
+            await until(lambda: sess.tick == "running", what="tick running")  # the timer gets armed
             fut = await sess.send_command("act", do="use_bots")
             cmd = await g.expect({"t": "act"})
             # The tick stops: ev.pause{on:true}, then the one paused snapshot.
             await g.send("ev.pause", on=True)
             await g.send("state", rate="paused", ship={"hull": 0.8, "shield": 0.4, "mode": "free"})
-            await until(lambda: sess.paused, what="paused")
+            await until(lambda: sess.tick == "stopped", what="tick stopped")
             pings_before = len(g.pings)
             await g.expect_silence(1.3)  # longer than the ack timeout; the sidecar's pings get auto-pongs
             assert not fut.done() and app.server.stats.ack_timeouts == 0
@@ -104,7 +105,7 @@ def test_pause_suspends_ack_timeouts_and_keeps_the_heartbeat(fakegame):
             assert a1["id"] == cmd["id"] and a1["ok"] is True and a2["id"] == cmd2["id"]
             st = app.server.stats
             assert st.ack_timeouts == 0 and st.late_acks == 0 and st.ping_timeouts == 0
-            assert sess.reconciled == [] and sess.pending == {} and not sess.paused and not sess.closing
+            assert sess.reconciled == [] and sess.pending == {} and sess.tick == "running" and not sess.closing
             await g.close()
     run(body())
 
@@ -116,13 +117,14 @@ def test_resume_rearms_the_ack_timer_in_full(fakegame):
             await g.connect()
             await g.handshake()
             sess = await app.server.wait_for_session()
+            await until(lambda: sess.tick == "running", what="tick running")
             fut = await sess.send_command("act", do="use_batts")
             await g.expect({"t": "act"})
             await g.send("ev.pause", on=True)
-            await until(lambda: sess.paused, what="paused")
+            await until(lambda: sess.tick == "stopped", what="tick stopped")
             await g.expect_silence(1.0)
             await g.send("ev.pause", on=False)
-            await until(lambda: not sess.paused, what="resumed")
+            await until(lambda: sess.tick == "running", what="tick running")
             t_resume = time.monotonic()
             assert await asyncio.wait_for(fut, 3.0) is None  # no ack after the resume: overdue again
             assert time.monotonic() - t_resume >= 0.5  # a full new timeout, not the remainder
@@ -138,6 +140,7 @@ def test_late_ack_is_reconciled_and_session_end_resolves_the_rest(fakegame):
             await g.connect()
             await g.handshake()
             sess = await app.server.wait_for_session()
+            await until(lambda: sess.tick == "running", what="tick running")
             seen_sync: list = []
             seen_async: list = []
 
@@ -369,22 +372,98 @@ def launcher_env(tmp_path, **extra) -> dict:
     return env
 
 
-@pytest.mark.parametrize("extra_env,args", [
+# These tests must never hold or reach the host's 29170, even if a guard regresses (review r2):
+# the in-process ones patch out serving and binding, and the subprocess ones run in a private
+# network namespace (its own loopback and its own 29170) and are killed on any ready line.
+PLAY_PORT_CASES = [
     ({}, []),                                   # config default port 29170
     ({"FLCOPILOT_PORT": "29170"}, []),          # from the environment
     ({}, ["--port", "29170"]),                  # explicit
-])
-def test_run_sh_test_profile_refuses_play_port(tmp_path, extra_env, args):
+]
+
+
+def isolated(argv: list[str]) -> list[str]:
+    """argv run in a new user + network namespace with its own loopback up."""
+    return ["unshare", "-rn", "sh", "-c", 'ip link set lo up && exec "$@"', "sh", *map(str, argv)]
+
+
+@pytest.fixture(scope="module")
+def netns():
+    try:
+        ok = subprocess.run(isolated(["true"]), capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    if not ok:
+        pytest.skip("needs `unshare -rn` and `ip` (a private network namespace), so that a regressed "
+                    "guard can never bind or reach the host's play port; the in-process guard tests still run")
+    return isolated
+
+
+def run_killing_on_ready(argv, env, timeout: float = 30.0):
+    """Run argv; kill it the moment it prints the ready line (it bound a port). Returns
+    (returncode, stdout, stderr, saw_ready)."""
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    lines: list[str] = []
+    ready = threading.Event()
+
+    def reader():
+        for line in proc.stdout:
+            lines.append(line)
+            if "FLCOPILOT ready" in line:
+                ready.set()
+                proc.kill()
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    try:
+        rc = proc.wait(timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        rc = proc.wait()
+    t.join(5)
+    err = proc.stderr.read()
+    proc.stderr.close()
+    return rc, "".join(lines), err, ready.is_set()
+
+
+@pytest.mark.parametrize("extra_env,args", PLAY_PORT_CASES)
+def test_cli_guard_refuses_before_anything_binds(tmp_path, monkeypatch, extra_env, args):
+    from flcopilot import cli
+    for k in [k for k in os.environ if k.startswith("FLCOPILOT_")]:
+        monkeypatch.delenv(k)
+    for k, v in extra_env.items():
+        monkeypatch.setenv(k, v)
+    with patch("flcopilot.cli.serve", new=AsyncMock(return_value=0)) as serve, \
+            patch("asyncio.start_server", side_effect=AssertionError("a socket was bound")) as bind:
+        rc = cli.main(["--profile", "test", *args, "--no-local-config", "--log-file", str(tmp_path / "l.log"),
+                       "--quiet"])
+    assert rc == 2 and not serve.called and not bind.called
+    assert "play port" in (tmp_path / "l.log").read_text(encoding="utf-8")
+
+
+def test_cli_selftest_picks_port_0_before_anything_binds(tmp_path, monkeypatch):
+    from flcopilot import cli
+    for k in [k for k in os.environ if k.startswith("FLCOPILOT_")]:
+        monkeypatch.delenv(k)
+    with patch("flcopilot.cli.selftest", new=AsyncMock(return_value=0)) as selftest, \
+            patch("asyncio.start_server", side_effect=AssertionError("a socket was bound")):
+        rc = cli.main(["--selftest", "--no-local-config", "--log-file", str(tmp_path / "l.log"), "--quiet"])
+    assert rc == 0 and selftest.call_args.args[0].get("server.port") == 0
+
+
+@pytest.mark.parametrize("extra_env,args", PLAY_PORT_CASES)
+def test_run_sh_test_profile_refuses_play_port(tmp_path, netns, extra_env, args):
     log = tmp_path / "l.log"
-    res = subprocess.run([str(RUN_SH), "--profile", "test", *args, "--log-file", str(log), "--quiet"],
-                         capture_output=True, text=True, timeout=30, env=launcher_env(tmp_path, **extra_env))
-    assert res.returncode == 2, (res.stdout, res.stderr)
-    assert "FLCOPILOT ready" not in res.stdout
+    rc, out, err, saw_ready = run_killing_on_ready(
+        netns([RUN_SH, "--profile", "test", *args, "--log-file", log, "--quiet"]),
+        launcher_env(tmp_path, **extra_env))
+    assert not saw_ready, "the test profile started serving on the play port (inside the private namespace)"
+    assert rc == 2, (out, err)
     assert "play port" in log.read_text(encoding="utf-8")
 
 
-def test_selftest_defaults_to_an_ephemeral_port(tmp_path):
-    res = subprocess.run([str(RUN_SH), "--selftest", "--log-file", str(tmp_path / "l.log"), "--quiet"],
+def test_selftest_defaults_to_an_ephemeral_port(tmp_path, netns):
+    res = subprocess.run(netns([RUN_SH, "--selftest", "--log-file", tmp_path / "l.log", "--quiet"]),
                          capture_output=True, text=True, timeout=60, env=launcher_env(tmp_path))
     assert res.returncode == 0, (res.stdout, res.stderr)
     port = int(res.stdout.split("port=")[1].split()[0])
@@ -396,9 +475,9 @@ def test_selftest_defaults_to_an_ephemeral_port(tmp_path):
     (["--port", "29170"], {}, "refusing the play port"),
     ([], {"FLCOPILOT_PORT": "29170"}, "refusing the play port"),
 ])
-def test_fakegame_cli_needs_a_non_play_port(tmp_path, args, extra_env, needle):
+def test_fakegame_cli_needs_a_non_play_port(tmp_path, netns, args, extra_env, needle):
     env = launcher_env(tmp_path, **extra_env)
-    res = subprocess.run([sys.executable, "-I", str(FAKEGAME), *args, str(SCRIPTS_DIR / "handshake.ndjson")],
+    res = subprocess.run(netns([sys.executable, "-I", FAKEGAME, *args, SCRIPTS_DIR / "handshake.ndjson"]),
                          capture_output=True, text=True, timeout=30, env=env)
     assert res.returncode == 2 and needle in res.stderr, (res.stdout, res.stderr)
 

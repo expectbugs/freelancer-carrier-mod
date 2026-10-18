@@ -225,9 +225,17 @@ class FakeGame:
         msg.update(overrides)
         return await self.send(msg)
 
-    async def handshake(self, timeout: float = 2.0, **overrides) -> dict:
+    async def handshake(self, timeout: float = 2.0, state: dict | bool = True, **overrides) -> dict:
+        """hello, then wait for welcome. Like the DLL (ipc.md §4.7), report the tick right after:
+        ``state=True`` sends a running ``state{rate:"calm"}``, a dict sends that state, False sends
+        nothing (the sidecar then treats the tick as unknown)."""
         await self.hello(**overrides)
-        return await self.expect({"t": "welcome", "v": PROTOCOL_VERSION}, timeout=timeout)
+        welcome = await self.expect({"t": "welcome", "v": PROTOCOL_VERSION}, timeout=timeout)
+        if state is True:
+            await self.send("state", rate="calm")
+        elif isinstance(state, dict):
+            await self.send({"t": "state", **state})
+        return welcome
 
     async def ptt(self, down: bool, reason: str | None = None) -> dict:
         """A push-to-talk edge. ``reason`` (only with down=False) makes it a cancel: the DLL stopped

@@ -22,18 +22,23 @@ class VoicePipeline:
         self.profile = profile
         self._tasks: dict[asyncio.Task, object] = {}  # utterance task -> its session
         self._session = None  # the session that owns the mic
+        self._pressed = False  # that session's key is down (ipc.md §7.2)
         self.utterances = 0
         self.cancelled = 0
+        self.ignored_ptt = 0
         self.last_timing: dict = {}
 
     def install(self, registry) -> None:
         registry.register_handler("ptt", self.on_ptt)
+        for t in ("ev.pause", "ev.menu", "ev.load"):
+            registry.register_handler(t, self.on_tick_edge)
         registry.on_session_start(self.on_session_start)
         registry.on_session_end(self.on_session_end)
 
     # ---- session lifecycle -------------------------------------------------------------
     def on_session_start(self, session) -> None:
         self._session = session
+        self._pressed = False
         try:
             self.profile.mic.reset()  # no recording state survives into a new session
             self.profile.mic.open()  # idempotent
@@ -49,6 +54,7 @@ class VoicePipeline:
         if session is not self._session:
             return
         self._session = None
+        self._pressed = False
         try:
             self.profile.mic.cancel()  # a press held across the disconnect is cancelled (ipc.md §4.7)
             self.profile.mic.close()
@@ -56,21 +62,51 @@ class VoicePipeline:
             log.warning("mic close failed", extra={"kv": {"err": repr(exc)[:200]}})
 
     # ---- push-to-talk ------------------------------------------------------------------
+    def _ignore(self, session, why: str) -> None:
+        self.ignored_ptt += 1
+        log.debug("ptt ignored", extra={"kv": {"sid": session.sid, "why": why}})
+
+    def _cancel_press(self, session, reason: str) -> None:
+        self._pressed = False
+        self.profile.mic.cancel()
+        self.cancelled += 1
+        log.info("ptt cancelled", extra={"kv": {"sid": session.sid, "reason": reason}})
+
     def on_ptt(self, session, msg: dict) -> None:
+        """Push-to-talk edges, tracked per session (ipc.md §7.2): only the session that owns the mic
+        counts; a press while down, and a release or cancel while not down, are ignored."""
+        if session is not self._session:
+            self._ignore(session, "not the session that owns the mic")
+            return
         if msg["down"]:
+            if self._pressed:
+                self._ignore(session, "down while already down")
+                return
+            self._pressed = True
             self.profile.mic.ptt_down()
             log.info("ptt down", extra={"kv": {"sid": session.sid}})
             return
+        if not self._pressed:
+            self._ignore(session, "release or cancel while not down")
+            return
         if "reason" in msg:
             # Polling stopped with the key held (focus lost, pause, menu, chat): a cancel, not an order.
-            self.profile.mic.cancel()
-            self.cancelled += 1
-            log.info("ptt cancelled", extra={"kv": {"sid": session.sid, "reason": msg["reason"]}})
+            self._cancel_press(session, msg["reason"])
             return
+        self._pressed = False
         log.info("ptt up", extra={"kv": {"sid": session.sid}})
         task = asyncio.ensure_future(self._utterance(session, time.perf_counter()))
         self._tasks[task] = session
         task.add_done_callback(lambda t: self._tasks.pop(t, None))
+
+    def on_tick_edge(self, session, msg: dict) -> None:
+        """Backstop for a lost cancel: the tick stopping (ev.pause{on:true}), the main menu and a
+        load each cancel a press that is still held (ipc.md §4.7)."""
+        if session is not self._session or not self._pressed:
+            return
+        if msg["t"] == "ev.pause" and not msg["on"]:
+            return
+        self._cancel_press(session, msg["t"])
 
     async def _utterance(self, session, t_up: float) -> None:
         p = self.profile

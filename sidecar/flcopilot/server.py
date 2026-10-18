@@ -9,8 +9,9 @@
   session is closed with ``bye{reason:"timeout"}``.
 - Commands get ids from a per-process counter. An ack overdue by ``ack_timeout_s`` resolves the
   command's future to ``None`` and marks it late; a late ack still arrives and is reconciled
-  (``on_late`` callback, ``Session.reconciled``) until the session ends. While the game reports
-  ``ev.pause{on:true}`` (tick stopped) the ack timeouts are suspended.
+  (``on_late`` callback, ``Session.reconciled``) until the session ends. Ack timeouts run only
+  while the game tick runs: a session starts with the tick *unknown* (the DLL reports it right
+  after ``welcome``), and ``ev.pause{on:true}`` / ``ev.menu`` stop it (ipc.md §4.7).
 - A peer that stops reading is aborted (``send_timeout``), never left half-closed.
 - Everything else goes through the :class:`~flcopilot.registry.HandlerRegistry`.
 """
@@ -35,6 +36,12 @@ log = logsetup.get("server")
 MAX_PENDING_CONNECTIONS = 4
 SEND_TIMEOUT_S = 2.0
 CLOSE_FLUSH_S = 2.0
+#: Distinct unknown message types logged at WARNING per connection; later new ones go to DEBUG.
+UNKNOWN_TYPES_LOGGED = 64
+
+#: Game tick as the sidecar knows it (ipc.md §4.7). "unknown" lasts from welcome until the DLL's
+#: first state / ev.pause / ev.menu; ack timers run only while "running".
+TICK_UNKNOWN, TICK_RUNNING, TICK_STOPPED = "unknown", "running", "stopped"
 
 #: Command ids are unique per process, so a stale ack from an earlier connection can never
 #: resolve a command of a later one (ipc.md §3, §7.3).
@@ -104,12 +111,14 @@ class Session:
         self._ping_n = 0
         self._discarding = False
         self._unknown_seen: set[str] = set()
+        self._unknown_cap_logged = False
         self._send_lock = asyncio.Lock()
         self._heartbeat: asyncio.Task | None = None
         self._handshake_timer: asyncio.TimerHandle | None = None
         self.pending: dict[str, Pending] = {}
         self.reconciled: list[dict] = []  # late acks that arrived after their timeout
-        self.paused = False  # ev.pause{on}: the game tick is stopped
+        self.tick = TICK_UNKNOWN  # see TICK_*; reported by the DLL right after welcome
+        self._tick_timer: asyncio.TimerHandle | None = None
         self._flush_timer: asyncio.TimerHandle | None = None
         self.done = asyncio.Event()
         self.data: dict[str, Any] = {}  # scratch space for features (keyed by feature name)
@@ -195,22 +204,42 @@ class Session:
         if not p.fut.done():
             p.fut.set_result(None)
 
+    @property
+    def paused(self) -> bool:
+        """Ack timers are suspended: the game tick is stopped, or not reported yet."""
+        return self.tick != TICK_RUNNING
+
     def set_paused(self, on: bool) -> None:
-        """ev.pause: the game tick stopped (on) or resumed. Ack timeouts are suspended while paused
-        and restart in full on resume, because the DLL applies (and acks) commands on its tick."""
-        if on == self.paused:
+        """ev.pause: the game tick stopped (on) or resumed."""
+        self._set_tick(TICK_STOPPED if on else TICK_RUNNING, "ev.pause")
+
+    def _set_tick(self, new: str, why: str) -> None:
+        """Ack timeouts are suspended unless the tick runs and restart in full when it starts,
+        because the DLL applies (and acks) commands on its tick (ipc.md §4.7)."""
+        old = self.tick
+        if new == old:
             return
-        self.paused = on
-        for cid, p in self.pending.items():
-            if p.late:
-                continue
-            if on and p.timer is not None:
-                p.timer.cancel()
-                p.timer = None
-            elif not on:
-                self._arm(cid)
-        log.info("game paused; ack timeouts suspended" if on else "game resumed; ack timeouts restarted",
-                 extra={"kv": {"sid": self.sid, "pending": len(self.pending)}})
+        self.tick = new
+        if self._tick_timer is not None:
+            self._tick_timer.cancel()
+            self._tick_timer = None
+        if new == TICK_RUNNING:
+            for cid in list(self.pending):
+                self._arm(cid)  # skips late commands
+        elif old == TICK_RUNNING:
+            for p in self.pending.values():
+                if not p.late and p.timer is not None:
+                    p.timer.cancel()
+                    p.timer = None
+        log.info("game tick " + new, extra={"kv": {"sid": self.sid, "from": old, "why": why,
+                                                    "pending": len(self.pending)}})
+
+    def _on_tick_unknown_timeout(self) -> None:
+        self._tick_timer = None
+        if self.tick == TICK_UNKNOWN and not self.closing:
+            log.warning("no state, ev.pause or ev.menu after welcome; assuming the game tick runs",
+                        extra={"kv": {"sid": self.sid}})
+            self._set_tick(TICK_RUNNING, "no report after welcome")
 
     def _abort(self) -> None:
         self.closing = True
@@ -246,6 +275,8 @@ class Session:
                                                   **({"detail": detail} if detail else {})}})
         if self._handshake_timer:
             self._handshake_timer.cancel()
+        if self._tick_timer:
+            self._tick_timer.cancel()
         if self._heartbeat and self._heartbeat is not asyncio.current_task():
             self._heartbeat.cancel()
         try:
@@ -282,6 +313,8 @@ class Session:
             self.close_reason = self.close_reason or "eof"
         if self._handshake_timer:
             self._handshake_timer.cancel()
+        if self._tick_timer:
+            self._tick_timer.cancel()
         if self._heartbeat and self._heartbeat is not asyncio.current_task():
             self._heartbeat.cancel()
         for cid in list(self.pending):
@@ -403,10 +436,17 @@ class Session:
             if registry.has_specific_handler(t):
                 await registry.dispatch(self, msg)
                 return
+            kv = {"sid": self.sid, "t": t[:64]}
             first = t not in self._unknown_seen
-            if len(self._unknown_seen) < 64:
+            if first and len(self._unknown_seen) < UNKNOWN_TYPES_LOGGED:
                 self._unknown_seen.add(t)
-            log.log(30 if first else 10, "unknown message type ignored", extra={"kv": {"sid": self.sid, "t": t}})
+                log.warning("unknown message type ignored", extra={"kv": kv})
+            elif first and not self._unknown_cap_logged:
+                self._unknown_cap_logged = True
+                log.warning("unknown-type log cap reached; further unknown types are logged at DEBUG",
+                            extra={"kv": {**kv, "cap": UNKNOWN_TYPES_LOGGED}})
+            else:
+                log.debug("unknown message type ignored", extra={"kv": kv})
             return
         if spec.direction == protocol.S2G:
             stats.wrong_direction += 1
@@ -447,8 +487,12 @@ class Session:
                 self._finish(cid, msg)
         elif t == "ev.pause":
             self.set_paused(bool(msg["on"]))
+        elif t == "ev.menu":
+            self._set_tick(TICK_STOPPED, "ev.menu")
         elif t == "state":
             self.last_state = msg
+            if self.tick == TICK_UNKNOWN:  # the first report after welcome (ipc.md §4.7)
+                self._set_tick(TICK_STOPPED if msg["rate"] == "paused" else TICK_RUNNING, "first state")
         await registry.dispatch(self, msg)
 
     async def _on_hello(self, msg: dict) -> None:
@@ -485,6 +529,9 @@ class Session:
             log.warning("DLL polls a different push-to-talk key than configured",
                         extra={"kv": {"sid": self.sid, "dll_vk": ptt, "config_vk": self.server.ptt_vk}})
         if first:
+            # The DLL reports the tick right after welcome; if it never does, assume it runs.
+            self._tick_timer = asyncio.get_running_loop().call_later(
+                self.server.handshake_timeout_s, self._on_tick_unknown_timeout)
             self._heartbeat = asyncio.ensure_future(self._heartbeat_loop())
             self.started = True
             await self.server.registry.session_started(self)
