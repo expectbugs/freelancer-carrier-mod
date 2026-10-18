@@ -17,7 +17,42 @@ Format:
 
 ## Facts
 
-(none yet; Phase 0 spikes fill this in)
+## EF-001 — Wine's builtin vcruntime140 kills the process when an exception leaves a catch block into a try in the same function, unless code is built with `-mstackrealign`
+- Status: VERIFIED
+- Evidence: `$FLMOD_TESTRUNS/20261018T072930Z-toolchain-loadproof/`, `20261018T072950Z-ehprobe/` (37 PASS / 3 KNOWN-BROKEN / 0 FAIL per track × CRT); negative control `20261018T054555Z-ehprobe/` and the r3 review's `R/24` (without the flag: 4 FAIL under builtin, 0 under native)
+- Source package: P0-TOOLCHAIN (attempt 1), 2026-10-18
+- Notes / how to use: `/clang:-mstackrealign` is in every TU's flags (stage 10's `check_flags.py` enforces it). Native vcruntime140 also avoids it. Prebuilt code we don't compile (FLUF, HDE DLLs) can still hit it under the builtin runtime. Run `toolchain/ehprobe.sh --crt both` per D110.
+
+## EF-002 — `__try` at /O2 returns with EBX/ESI/EDI clobbered after a handled fault; `catch(...)` sees an access violation only under /EHa and only inside an opaque call
+- Status: VERIFIED (both runtimes, both tracks)
+- Evidence: ehprobe cases `a_seh_regs_raw`, `b_catchall_av_inline`, `b_catchall_av_call` (KNOWN-BROKEN in every run above)
+- Source package: P0-TOOLCHAIN (attempt 1), 2026-10-18
+- Notes / how to use: coding rules, no flag fixes them: use the `flmod_seh_guard` clobber barrier (toolchain/ABI.md §6.1) and the §6.7 hook template (work under the guard, try/catch inside it, `catch(...)` logged as "possibly SEH").
+
+## EF-003 — A fault inside Common.dll is caught by `flmod_seh_guard` with the caller's registers intact; C++ EH works across msvcrt.dll frames, worker threads, nested guards and VC6-style `_CxxThrowException`
+- Status: VERIFIED (both runtimes, both tracks; host process loading the game DLLs, not an in-game run)
+- Evidence: ehprobe `hook` group (13 cases) in the runs above; `PhySys::DeactivatePhysics((CObject*)0x10)` as the engine fault
+- Source package: P0-TOOLCHAIN (attempt 1, fix round 2), 2026-10-18
+- Notes / how to use: in-game items (exceptions through FLUF.dll frames, VEH/SetUnhandledExceptionFilter crash handlers, throws in DllMain/static init) are untested: toolchain/ABI.md §6.8, for P0-TRACK-A/B.
+
+## EF-004 — The dev/play prefixes set `msvcp140*`, `vcruntime140*`, `ucrtbase`, `concrt140`, `msvcp1?0` (and others) to `native,builtin`, so a CRT DLL dropped next to Freelancer.exe silently switches the whole process's runtime
+- Status: VERIFIED
+- Evidence: P0-TOOLCHAIN `+loaddll` runs E1/E2 (toolchain/NOTES.md "Question 3"); r3 review confirms the full list (toolchain/ABI.md §6.6)
+- Source package: P0-TOOLCHAIN (attempt 1), 2026-10-18
+- Notes / how to use: deploy must assert no stray CRT DLL in the EXE dir. Default runtime is Wine's builtin (D110 / f1 recommendation); the app-local native redist is the Track A fallback.
+
+## EF-005 — Wine drops console stdout redirected to a regular file; pipes work
+- Status: VERIFIED
+- Evidence: P0-TOOLCHAIN load proof (toolchain/NOTES.md)
+- Source package: P0-TOOLCHAIN (attempt 1), 2026-10-18
+- Notes / how to use: pipe console output (`| tee`) when capturing from Wine console programs.
+
+## EF-006 — Faster-whisper on the RTX 3090 (CUDA, float16): ~120–140 ms speech-to-text for a 2 s clip warm (~710 ms first); Kokoro TTS first audio ~360–400 ms; ~2.3 GB VRAM; CPU fallback ~7.8 s per 2 s clip
+- Status: VERIFIED (host, not in game)
+- Evidence: `$FLMOD_TESTRUNS/20261018T064806Z-voice-smoke`, `…064822Z-voice-smoke-netns` (offline, loopback only), r2 review `…070235Z-review-P0-SIDECAR-r2/voice-smoke/`
+- Source package: P0-SIDECAR (attempt 1), 2026-10-18
+- Notes / how to use: the CPU fallback is far too slow for push-to-talk; W1-SIDECAR must require CUDA for live voice or degrade to text.
+
 
 ## Research claims queued for verification (from local/research)
 
