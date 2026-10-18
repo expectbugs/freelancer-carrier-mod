@@ -207,3 +207,8 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
 - **Choice:** merge HARNESS now (squash, D106) to start the bake-off; fix the MINORs on `wp/P0-HARNESS-b` (same agent, from main), reviewed by the r2 reviewer, merged `--no-ff`. The follow-up also adds `harness/tests` as a root of CI stage 30 (`harness/ci.d/30-pytest.sh`, ownership passes from P0-DATATOOLS to the orchestrator-approved edit here; W1-HARNESS owns it from Wave 1), with the tests that need lanes, X or Wine skipping cleanly when those aren't available.
 - **Why:** the bake-off is the critical path; the lock-order bug only bites during a baseline re-init, which the track packages don't run. Harness regressions should fail CI, not wait for a manual selftest.
 - **Decided by:** orchestrator
+
+## D114 — 2026-10-18 — Planned pause (Adam's request)
+- **Context:** Adam asked to wind down: let running tasks finish and create a clean resume point. At that time P0-TRACK-A and P0-TRACK-B were mid-run; everything else was merged.
+- **Choice:** the track agents finished their current step, released lanes, committed a RESUME POINT and reported PARTIAL; no long runs were started. The orchestrator saved both reports, wrote per-package resume briefs, removed every clean worktree (branches keep all work; temporary `worktree-agent-*` branches with no unique commits deleted), set `BUILD_STATUS: STOPPED` (the watchdog exits on it), restored the display settings (`display-awake.sh stop`), committed and pushed. No STOP file was used, so the watchdog never killed lanes under a running agent. Resume: `tools/start-build.sh` (resets STOPPED → IN_PROGRESS and launches the resume prompt; ledger "Next actions" has the plan).
+- **Decided by:** Adam (pause), orchestrator (procedure)

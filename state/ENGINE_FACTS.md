@@ -59,6 +59,7 @@ Format:
 - Evidence: P0-HARNESS selftest runs `$FLMOD_TESTRUNS/20261018-085758-selftest`, `20261018-091057-selftest` (b_smoke, b_eagle, b_fp9, b_longcmd, concurrent); mixed-load `mixload-cap60-*` (12/12 PASS, GPU ≤ 48 %); harness/NOTES.md N11, N16, N17
 - Source package: P0-HARNESS (attempt 1), 2026-10-18
 - Notes / how to use: Proton 11's DXVK 3.1.1 has no `DXVK_FRAME_RATE`; use `d3d9.maxFrameRate` in dxvk.conf. Renderer classes (DXVK vs wined3d-sw) never mix on the host.
+- **Correction (P0-TRACK-B checkpoint, 2026-10-18):** "launches to space" is PARTIAL. The harness selftest DLL's menu `load` (LoadGame from the main menu) leaves an intro-scene flag set: the client never reports base enter/exit to the server, and the first launch puts the ship at the system origin, where it dies. Survival after launch was never asserted. Fix: run FL's own front-end "start game" step (wp/P0-TRACK-B `spikes/track_b/NOTES.md` finding 1). Tracked as FIX-1 in the ledger.
 
 ## EF-008 — Track A (HDE minus the FLUF-forbidden DLLs, plus FLUF core) boots to the menu but crashes ~2 s after it whenever any `.fl` file is in the save folder (`dacom.dll+0x5e6c`, a stricmp); the same install without FLUF.dll is fine
 - Status: VERIFIED (15 runs)
