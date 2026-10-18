@@ -12,6 +12,7 @@ print(json.dumps({
     "prefix": sys.prefix,
     "ld_library_path": os.environ.get("LD_LIBRARY_PATH", "").split(":") if os.environ.get("LD_LIBRARY_PATH") else [],
     "hf_hub_offline": os.environ.get("HF_HUB_OFFLINE"),
+    "dbus_session_bus_address": os.environ.get("DBUS_SESSION_BUS_ADDRESS"),
     "pythonpath": os.environ.get("PYTHONPATH"),
     "no_user_site": bool(sys.flags.no_user_site),
     "safe_path": bool(sys.flags.safe_path),

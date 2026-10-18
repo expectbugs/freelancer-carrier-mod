@@ -150,13 +150,13 @@ class KokoroEngine:
     def _ensure(self) -> None:
         if self._kokoro is not None:
             return
+        for p in (self.model_path, self.voices_path):
+            if not p.exists():
+                raise FileNotFoundError(f"Kokoro model file missing: {p}")
         import kokoro_onnx
 
         # kokoro-onnx 0.5.0 allows index 510 into a 510-row style table; clamp to 509.
         kokoro_onnx.MAX_PHONEME_LENGTH = 509
-        for p in (self.model_path, self.voices_path):
-            if not p.exists():
-                raise FileNotFoundError(f"Kokoro model file missing: {p}")
         t0 = time.perf_counter()
         self._kokoro = kokoro_onnx.Kokoro(str(self.model_path), str(self.voices_path))
         self.load_ms = (time.perf_counter() - t0) * 1000.0

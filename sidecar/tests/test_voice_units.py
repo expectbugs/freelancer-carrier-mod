@@ -41,6 +41,7 @@ def test_fake_tts_is_deterministic_and_numpy_free():
 
 
 def test_kokoro_engine_with_mocked_library(tmp_path):
+    pytest.importorskip("kokoro_onnx", reason="sidecar venv test (kokoro-onnx not installed here)")
     (tmp_path / "kokoro-v1.0.onnx").write_bytes(b"x")
     (tmp_path / "voices-v1.0.bin").write_bytes(b"x")
     with patch("kokoro_onnx.Kokoro") as kokoro:
@@ -63,6 +64,7 @@ def test_kokoro_engine_missing_files(tmp_path):
 
 def test_whisper_engine_offline_options_and_cpu_fallback(tmp_path):
     np = pytest.importorskip("numpy")
+    pytest.importorskip("faster_whisper", reason="sidecar venv test (faster-whisper not installed here)")
     (tmp_path / "model.bin").write_bytes(b"x")
     seg = MagicMock(start=0.0, end=1.0, text=" save nanobots for the cruiser ")
     info = MagicMock(language="en", duration=1.0)

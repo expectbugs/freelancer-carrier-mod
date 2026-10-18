@@ -41,10 +41,16 @@ def test_run_sh_selftest(tmp_path):
 def test_run_sh_environment(tmp_path):
     """run.sh puts the venv's CUDA-12 libs first on LD_LIBRARY_PATH, forces offline HF, and
     isolates sys.path (no user site, no cwd/script dir, PYTHONPATH = the sidecar dir)."""
+    env = launcher_env(tmp_path, LD_LIBRARY_PATH="/opt/elsewhere")
+    env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     res = subprocess.run([str(RUN_SH), "--tool", "env_probe"], capture_output=True, text=True, timeout=30,
-                         env=launcher_env(tmp_path, LD_LIBRARY_PATH="/opt/elsewhere"), cwd=str(tmp_path))
+                         env=env, cwd=str(tmp_path))
     assert res.returncode == 0, res.stderr
     probe = json.loads(res.stdout)
+    assert probe["dbus_session_bus_address"] == "disabled:"  # no D-Bus autolaunch via X11 (NOTES B-2)
+    env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/example-bus"
+    res = subprocess.run([str(RUN_SH), "--tool", "env_probe"], capture_output=True, text=True, timeout=30, env=env)
+    assert json.loads(res.stdout)["dbus_session_bus_address"] == "unix:path=/run/example-bus"  # a real one is kept
     assert probe["prefix"] == sys.prefix
     assert probe["hf_hub_offline"] == "1"
     assert probe["no_user_site"] and probe["safe_path"]

@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 np = pytest.importorskip("numpy")
+pytest.importorskip("sounddevice", reason="sidecar venv test (sounddevice not installed here)")
 
 from conftest import run  # noqa: E402
 from flcopilot.audio.capture import PttCapture  # noqa: E402

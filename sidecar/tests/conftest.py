@@ -5,10 +5,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# Same as run.sh: importing sounddevice (even just to patch it) must not trigger a libdbus
+# autolaunch through X11, which hangs while the X server is unresponsive (NOTES.md B-2).
+os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "disabled:")
 
 SIDECAR_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = SIDECAR_DIR.parent

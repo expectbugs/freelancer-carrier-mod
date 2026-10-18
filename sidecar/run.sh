@@ -39,6 +39,14 @@ fi
 export HF_HUB_OFFLINE=1
 export HF_HUB_DISABLE_TELEMETRY=1
 
+# The sidecar needs no D-Bus. Without a session bus address, PortAudio's ALSA device scan
+# (import sounddevice) makes libdbus autolaunch dbus-launch through X11, which blocks for as
+# long as the X server is unresponsive (VERIFIED 2026-10-17, sidecar/NOTES.md B-2). An
+# unknown transport makes libdbus fail fast instead. A real session address is left alone.
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+    export DBUS_SESSION_BUS_ADDRESS="disabled:"
+fi
+
 # Import only our own package: no user site (-s), no cwd/script dir on sys.path (-P),
 # PYTHONPATH pinned to this sidecar dir.
 unset PYTHONHOME PYTHONSTARTUP PYTHONINSPECT

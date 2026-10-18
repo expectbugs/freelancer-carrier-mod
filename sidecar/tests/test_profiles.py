@@ -14,6 +14,7 @@ from flcopilot.profiles import ProfileError, build_profile, guard_live
 def test_test_profile_produces_no_output_stream(fakegame):
     """A full PTT -> policy.set -> say round trip in the test profile: audio is 'played', but only
     into the null sink. sounddevice is patched at its defining module, so any device use shows."""
+    pytest.importorskip("sounddevice", reason="sidecar venv test (sounddevice not installed here)")
     with patch("sounddevice.OutputStream") as out_stream, patch("sounddevice.InputStream") as in_stream, \
             patch("sounddevice.play") as sd_play, patch("sounddevice.rec") as sd_rec:
         async def body():
@@ -50,6 +51,7 @@ def test_live_guard_env_switch():
 
 def test_live_profile_build_opens_nothing():
     """Building the live profile (guard bypassed) resolves the mic but opens no stream."""
+    pytest.importorskip("sounddevice", reason="sidecar venv test (sounddevice not installed here)")
     pactl = "0\talsa_input.usb-Example_Headset-00.mono-fallback\tPipeWire\ts16le 1ch 48000Hz\tSUSPENDED\n"
     with patch("sounddevice.OutputStream") as out_stream, patch("sounddevice.InputStream") as in_stream, \
             patch("shutil.which", return_value="/usr/bin/pactl"), patch("subprocess.run") as sp_run:
@@ -74,6 +76,7 @@ def test_live_profile_capture_disabled_by_default():
 
 
 def test_device_sink_uses_output_stream():
+    pytest.importorskip("sounddevice", reason="sidecar venv test (sounddevice not installed here)")
     with patch("sounddevice.OutputStream") as out_stream:
         DeviceSink("default").play([0.0] * 240, 24000, label="t")
     out_stream.assert_called_once()
@@ -96,6 +99,7 @@ def test_unknown_profile():
 def test_mic_file_feeds_the_pipeline(tmp_path, fakegame):
     np = pytest.importorskip("numpy")
     sf = pytest.importorskip("soundfile")
+    pytest.importorskip("sounddevice", reason="sidecar venv test (sounddevice not installed here)")
     wav = tmp_path / "order.wav"
     t = np.arange(48000) / 48000.0
     sf.write(str(wav), (0.2 * np.sin(2 * np.pi * 440 * t)).astype("float32"), 48000)  # 1 s at 48 kHz
