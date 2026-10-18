@@ -168,6 +168,16 @@ summary line, and writes `results.tsv`/`results.json`. Exit 0 = no FAIL, 1 = FAI
 `toolchain/load_proof.sh` runs it after the CreateID proof. A FAIL means a working feature broke (or a flag went
 missing); an unexpected PASS of a KNOWN-BROKEN case means a rule above may be obsolete: update this section.
 
+### 6.6 Which msvcp140/vcruntime140 the game process gets
+
+- Default: **Wine's builtins**. They export every symbol our binaries and the whole FLUF nightly import
+  (check_imports; `NOTES.md` "Question 3").
+- The play prefix and all its clones carry registry `DllOverrides` `msvcp140*`, `vcruntime140*`, `concrt140`,
+  `ucrtbase` = `native,builtin`. A native `vcruntime140.dll`/`msvcp140.dll` in the exe's directory therefore
+  replaces the builtins for **every** DLL in the process that imports them (FLUF, its modules, ours, and HDE's
+  FLHook, fmt, spdlog and pcre2 DLLs whenever they are loaded) without any environment variable. Only deploy them on purpose; the decision belongs to G0a/W1-PLATFORM.
+- Nothing in §6.1–6.4 may depend on which runtime is loaded: every rule holds under both (probe `--crt both`).
+
 ## 7. Licensing of what ends up inside our binaries (for W5-SHIP)
 
 - Track B DLLs **compile FLSDK's own sources** into the binary (`flmod::flsdk_static`, whenever a target links

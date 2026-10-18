@@ -226,66 +226,97 @@ TU, which changed the inliner's decisions.) `-mstack-alignment=16` alone changed
   `std::throw_with_nested`/`std::rethrow_if_nested` when called inside a catch block. With `-mstackrealign` these
   are safe in our own code (probe cases `lib_*`, `json_at_*`).
 
-## RESUME POINT (2026-10-18, review r1 fix round 1, paused for a reboot)
+## Question 3: app-local native MSVC runtime for FLUF (Track A)? (2026-10-18, open question for G0a/W1-PLATFORM)
 
-Branch `wp/P0-TOOLCHAIN`; the commit that adds this section is the resume SHA. Reviews: `state/reports/P0-TOOLCHAIN-r1.md`.
+Run dirs: `$FLMOD_TESTRUNS/20261018T0650Z-toolchain-fluf-crt/` (static analysis, `fluf_crt_static.md`) and
+`$FLMOD_TESTRUNS/20261018T0700Z-toolchain-fluf-crt-rerun/` (Wine runs E1–E3 and the FLUF source scan; the scripts
+`fluf_crt_static.py`, `crt_exp.sh`, `catch_throw_scan.py` are copied there). The first dir's `E3_matrix.tsv` has a
+wrong rc column (script bug, see its `README.txt`); use the rerun.
+
+**Evidence**
+
+1. What FLUF imports (33 DLLs: `EXE/fluf/*.dll` + `modules/*.dll` of the pinned nightly): 159 distinct
+   `msvcp140` symbols, 2 `msvcp140_atomic_wait`, 27 `vcruntime140`, 221 `api-ms-win-crt-*`. **Wine's builtins
+   export all of them (0 missing), and so does the native 14.51.36231 redist (0 missing).** VERIFIED (static,
+   llvm-readobj against the play prefix's syswow64 and `$FLMOD_VENDOR/msvc-redist/x86`).
+2. The native redist DLLs' own imports (`api-ms-win-crt-*` → Wine's builtin ucrtbase, `KERNEL32`, `ADVAPI32`,
+   `api-ms-win-core-synch`) all resolve in this prefix; only `vccorlib140.dll` (C++/CX, never needed) lacks WinRT
+   exports. The redist has no ucrtbase, so the UCRT stays Wine's either way. VERIFIED (static).
+3. The play prefix's `user.reg` has `[Software\\Wine\\DllOverrides]` `msvcp140`, `msvcp140_1`, `msvcp140_2`,
+   `msvcp140_atomic_wait`, `msvcp140_codecvt_ids`, `vcruntime140`, `vcruntime140_1`, `concrt140`, `ucrtbase` =
+   `native,builtin`, and its `syswow64` copies are Wine builtins (all eight present carry the "Wine builtin DLL"
+   marker; there is no 32-bit `vcruntime140_1.dll`, which is x64-only). No CRT
+   DLL sits in the HDE EXE dir today. VERIFIED (read-only grep of the play prefix).
+4. E1: native DLLs next to `loadtest.exe`, **no** `WINEDLLOVERRIDES`: `+loaddll` shows `VCRUNTIME140.dll … native`,
+   `MSVCP140.dll … native`, `ucrtbase.dll … builtin`. E2: same dir with `WINEDLLOVERRIDES=vcruntime140,msvcp140=b`:
+   both `builtin`. So dropping the files app-local is enough to switch the runtime, and the env var forces it back.
+   VERIFIED (`E1_native_noenv_loaddll.txt`, `E2_builtin_forced_loaddll.txt`).
+5. FLUF.dll is clang-cl code linked by lld-link (PE linker version 14.0, no Rich header; FLUF CI builds with
+   `cli.py configure --clang` on an msvc-wine runner, `.forgejo/workflows/nightly-release.yml`), and FLUF's build
+   files at `627ea2c` never pass `-mstackrealign` (grep of `CMakeLists.txt`, `cmake/`, `profiles/`). So FLUF.dll can
+   in principle hit Bug 2 (c) under Wine's builtin CRT. VERIFIED (files); whether any FLUF code path actually does is
+   UNVERIFIED.
+6. E3 stand-in for "clang-cl code without the flag": `ehprobe.dll` rebuilt with `/clang:-mno-stackrealign` (realigning
+   prologues 219 → 20). Under the builtin CRT `c_rethrow_same_frame`, `c_throw_new_from_catch_same_frame`,
+   `c_rethrow_cross_inlined`, `lib_rethrow_if_nested_in_catch` die (rc 5); with the native DLLs app-local and no env
+   var all four PASS; the other four c/lib cases PASS under both. VERIFIED (`E3_matrix.tsv`).
+7. FLUF's own exposure is small: a brace-matching scan of `FLUF/`, `FLUFBoot/`, `DacomFix/`, `modules/` (524 files)
+   finds 31 catch blocks and **0** `throw` statements inside them (`fluf_catch_throw_scan.txt`; positive control on
+   `ehprobe.cpp` finds its 5). Remaining exposure: library code inlined into FLUF (STL range insert, stream
+   exception masks, `rethrow_if_nested`), and calls inside catch blocks that themselves throw (e.g. a logging call
+   hitting `std::format_error`/`bad_alloc`). UNVERIFIED that none of those runs.
+8. A native runtime is process-wide: besides FLUF and our DLLs, 23 of the 106 PE files in the HDE EXE tree import
+   msvcp140/vcruntime140 (FLHook.dll and 16 `plugins/*.dll`, fmt.dll, spdlog.dll, pcre2-*.dll, FL Save Convert.exe)
+   and would switch too whenever they are loaded. VERIFIED (static scan, `fluf_crt_static.md` §3).
+
+**Recommendation (for G0a / W1-PLATFORM; not decided here)**
+
+- Keep **Wine's builtin CRT** as the default on both tracks; don't deploy the native DLLs. Our code is safe through
+  `-mstackrealign` (probe 24/3/0 with either runtime), FLUF's imports are fully covered by the builtins, and FLUF's
+  source has no catch-and-throw. Switching is a process-wide change that no game run has tested yet.
+- Keep it as a **documented fallback** for P0-TRACK-A: if an in-game Track A run dies with the Bug 2 (c) signature
+  inside FLUF or HDE frames (`WINEDEBUG=+seh`: a catch block "done, continuing at …" followed by an access violation
+  inside the catch funclet), deploy all nine DLLs from `$FLMOD_VENDOR/msvc-redist/x86/` into the lane's EXE dir at
+  deploy time (never into the play install, never committed). The prefix registry does the rest (E1); re-run the
+  probe with `--crt native`. Copy the whole set so `msvcp140_atomic_wait`/`_1`/`_2` match the native `msvcp140`.
+- Whatever is decided, the harness deploy step should assert that no stray `msvcp140*`/`vcruntime140*` DLL sits in the
+  EXE dir unless it was put there on purpose (E1 shows such a file silently changes the runtime).
+
+## RESUME POINT (2026-10-18, review r1 fix round 1: COMPLETE)
+
+Branch `wp/P0-TOOLCHAIN`. Reviews: `state/reports/P0-TOOLCHAIN-r1.md`. All r1 findings are done; nothing is pending.
+If a later round reopens this package, start from the review's new findings.
 
 ### Review r1 findings
 
-| Finding | State |
+| Finding | State / evidence |
 |---|---|
 | MAJOR EH: fix the /EHa comments | DONE (`clang-cl-i686.cmake`, `-overrides.cmake`) |
-| MAJOR EH: (a)-(c) in ABI.md + verified (a) workaround | DONE (ABI.md §6.1-6.5, copy-paste `flmod_seh_guard`) |
-| MAJOR EH: regression probe | DONE (`src/module/ehprobe`, `toolchain/ehprobe.sh`, `ehprobe_cases.tsv`; `load_proof.sh` runs it). Last runs: `$FLMOD_TESTRUNS/20261018T054636Z-toolchain-loadproof/` (B, both CRTs: 23 PASS / 3 KNOWN-BROKEN / 0 FAIL, before `a_seh_guard_cxx_exception` was added), `20261018T054744Z-ehprobe/` (B, both CRTs, 24/3/0), `20261018T054657Z-ehprobe/` (A, builtin, 23/3/0). Negative control without `-mstackrealign`: `20261018T054555Z-ehprobe/` (4 FAIL, exit 1) |
-| MAJOR EH: ten hypotheses for (b),(c), experiments | DONE (Bug 2 above; matrices in the exp run dirs; the scripts `eh_exp*.sh` are copied into those run dirs) |
-| MAJOR EH: toolchain-level fix | DONE for (c): `/clang:-mstackrealign` added to the common flags. (a), (b) stay rules |
-| MAJOR EH: engine facts for TRACK-A/B | REMAINING: write them into the final fix report (see "Facts to report" below) |
-| MINOR check_imports delay imports nested | DONE (parser + real-format fixture `REAL_DELAY_OUTPUT`; reviewer's `delaycommon.dll` now FAILs as it should) |
-| MINOR any missing msvcp140*/vcruntime140* DLL = FAIL | DONE (+ test) |
-| MINOR WILL_FAIL negative probes accept any failure | DONE (`tests/host/ExpectFailure.cmake`: non-zero exit AND specific text) |
-| MINOR lint denylist too small | DONE (allowlist: standard headers, `<nlohmann/...>`, quoted includes resolving under src/logic or src/contracts; fixtures for synchapi.h behind #ifdef, io.h, tchar.h, unresolved quoted include) |
-| MINOR /tests/ absolute-path filters, nested tests dirs | DONE (RELATIVE globs; `src/**/tests/**/*.cpp`, VERIFIED with a temporary nested test, removed) |
-| MINOR src/game not discovered: document for ARCH-0 | PARTLY: root CMakeLists comment done; README "Adding a target" not yet |
-| MINOR fetch_vendor --verify downloads / checks stamps only | DONE (offline, read-only; per-tree `.flmod-manifest`; tamper test FAILs, nothing written) |
-| MINOR PINS FLUF upstream URLs | PARTLY: fallback URLs in `fetch_vendor.sh` (Codeberg API VERIFIED: nightly 139359852 B, stable 55651208 B); PINS.md table not yet updated |
-| MINOR load_proof hard-coded clone | DONE (`--clone`, prefix-dev* only) |
-| MINOR ci.d protocol drift | MOSTLY: 10/20/50 rewritten (artifacts in `$CI_RUNDIR/<NN>-<name>/`, `CI_REPO_ROOT`, default run dir under `$FLMOD_TESTRUNS`, stage 50 reads `build/win32-track*/flmod_binaries.txt` so stale out/ files are ignored). Stage 10 re-run PASS (`$FLMOD_TESTRUNS/20261018T0600Z-toolchain-ci-r1/`). Stages 20 and 50 not yet re-run under the new protocol, stale-file test for 50 not yet run |
-| MINOR 14.5x STL claim overstated | DONE (marked UNVERIFIED in PINS.md and Decisions) |
-| MINOR FLSDK code embedded in binaries (W5-SHIP) | DONE in ABI.md §7 (also MinHook BSD-2 notice); PINS.md cross-reference not yet |
+| MAJOR EH: (a)-(c) in ABI.md + verified (a) workaround | DONE (ABI.md §6.1-6.6, copy-paste `flmod_seh_guard`) |
+| MAJOR EH: regression probe | DONE (`src/module/ehprobe`, `toolchain/ehprobe.sh`, `ehprobe_cases.tsv`; `load_proof.sh` runs it). Final runs on 2026-10-18: B `20261018T064132Z-toolchain-loadproof/` (LOAD PASS + EH both CRTs 24/3/0), A `20261018T064149Z-ehprobe/` (both CRTs 24/3/0). Negative control without `-mstackrealign`: `20261018T054555Z-ehprobe/` and Question 3 E3 |
+| MAJOR EH: ten hypotheses for (b),(c), experiments | DONE (Bug 2 above) |
+| MAJOR EH: toolchain-level fix | DONE for (c): `/clang:-mstackrealign` (every C/C++ TU of both builds, `20261018T064024Z-toolchain-acceptance-r1/12-flags-tu.txt`). (a), (b) stay rules |
+| MAJOR EH: engine facts for TRACK-A/B | DONE (final report) |
+| MINOR check_imports delay imports nested | DONE |
+| MINOR any missing msvcp140*/vcruntime140* DLL = FAIL | DONE |
+| MINOR WILL_FAIL negative probes accept any failure | DONE (`tests/host/ExpectFailure.cmake`) |
+| MINOR lint denylist too small | DONE (allowlist) |
+| MINOR /tests/ absolute-path filters, nested tests dirs | DONE |
+| MINOR src/game not discovered: document for ARCH-0 | DONE (root CMakeLists comment + README "Adding a target") |
+| MINOR fetch_vendor --verify downloads / checks stamps only | DONE |
+| MINOR PINS FLUF upstream URLs | DONE (PINS.md; HTTP 200 + matching content-length, 2026-10-18) |
+| MINOR load_proof hard-coded clone | DONE (`--clone`) |
+| MINOR ci.d protocol drift | DONE. Stages 10/20/50 run by P0-REPO's real `harness/ci.sh` (wp/P0-REPO @ 4e02754) with `--full --only build,host-tests,import-check` from an empty `build/`: PASS/PASS/PASS (`20261018T063859Z-ci/`). Stale-binary test: a FAILing DLL copied into `build/win32-trackB/out/` is ignored by stage 50 (`20261018T063947Z-ci/`, PASS; the same file checked directly FAILs, `stale_control.txt`), then deleted |
+| MINOR 14.5x STL claim overstated | DONE |
+| MINOR FLSDK code embedded in binaries (W5-SHIP) | DONE (ABI.md §7, PINS.md cross-reference) |
 
-### Exact next steps
+Full acceptance set from an empty `build/`: `$FLMOD_TESTRUNS/20261018T064024Z-toolchain-acceptance-r1/` (13 steps,
+all rc 0: host + host-asan ctest 5/5, both win32 builds, PE32 i386 headers, hello_a exports, check_imports both
+tracks, pytest 16/16, fetch_vendor/setup_xwin `--verify`, flags per TU, manual windows.h negative test).
 
-1. `harness/ci.d/20-host-tests.sh` and `50-import-check.sh` with `CI_RUNDIR=<new $FLMOD_TESTRUNS dir> CI_REPO_ROOT=<worktree> CI_MODE=full`;
-   then copy a stale DLL into `build/win32-trackB/out/` and confirm stage 50 ignores it; delete it.
-2. Re-run `toolchain/load_proof.sh build/win32-trackB --clone prefix-dev-toolchain-r1` (24 PASS / 3 KNOWN-BROKEN expected
-   per CRT) and `toolchain/ehprobe.sh --build build/win32-trackA --clone prefix-dev-toolchain-r1a --crt both`.
-3. README: `-mstackrealign` in the flag list, `flmod_win32_dll`, `ehprobe.sh`, `fetch_vendor --verify` semantics,
-   the lint allowlist, nested tests dirs, the src/game rule for ARCH-0, the ci.d protocol. PINS.md: FLUF upstream
-   URLs, the `msvc-redist-x86` pin, the FLSDK-embedding note.
-4. Re-run the full acceptance set from an empty `build/` (host, host-asan, both win32, check_imports, pytest
-   `toolchain/tests` (16 tests, last PASS), negative probes, fetch_vendor/setup_xwin `--verify`), `check_public`
-   (P0-REPO's copy at `.claude/worktrees/agent-af7c7d7da0b0d74b7/tools/check_public.py`, or main's if merged),
-   commit, and send the fix report.
+### Things outside the repo
 
-### Facts to report (engine facts for TRACK-A/B)
-
-- (a) `__try` functions at /O2 clobber the caller's EBX/ESI/EDI after a handled fault; the clobber-barrier guard is
-  INTACT (VERIFIED, both CRTs). (b) `catch(...)` sees an AV only under /EHa and only inside an opaque call (VERIFIED).
-  (c) fixed by `-mstackrealign` for our code; still possible inside prebuilt FLUF/HDE code under Wine's builtin CRT;
-  MSVC's native vcruntime140 also fixes it (VERIFIED). Open question for the orchestrator: deploy the native 14.51
-  CRT app-local (`$FLMOD_VENDOR/msvc-redist/x86` + `WINEDLLOVERRIDES=vcruntime140,msvcp140=n,b`) for Track A, where
-  FLUF.dll itself is clang-cl code without `-mstackrealign`?
-- Wine's apisetschema maps api-ms-win-crt-* to ucrtbase; wine drops console stdout redirected to a regular file.
-
-### Things outside the repo (all on the persistent root XFS, survive a reboot)
-
-- `$FLMOD_VENDOR` (`/home/user/freelancer/carrier-mod/vendor`): this round re-extracted every tree to add
-  `.flmod-manifest` files, and added `msvc-redist/x86/` (MSVC 14.51.36231 redist DLLs) plus its vsix in `.cache/dl/`.
-  `toolchain/fetch_vendor.sh --verify` was PASS afterwards (11/11).
-- `$XWIN_ROOT` (`/home/user/opt/xwin`) and `/home/user/opt/xwin-cache-18`: unchanged this round. `~/.cargo/bin/xwin` 0.10.0.
-- Wine prefixes: every `prefix-dev-toolchain*` clone was deleted by its script (none left; `prefix-dev-base-A/B`
-  belong to P0-HARNESS). No wine or background processes of mine are running.
-- Scratch copies in this session's `/tmp/claude-1000/.../scratchpad/` (redist DLLs, Wine/LLVM source excerpts used
-  for the analysis, experiment scripts) may not survive the reboot; nothing depends on them (scripts are copied into
-  the run dirs; sources are public: Wine proton_11.0 `dlls/msvcrt/except_i386.c`, LLVM llvmorg-22.1.8
-  `X86FrameLowering.cpp`, `X86WinEHState.cpp`, `WinException.cpp`).
+- `$FLMOD_VENDOR`, `$XWIN_ROOT`, `/home/user/opt/xwin-cache-18`: unchanged this session (`--verify` PASS).
+- Wine prefixes: every `prefix-dev-toolchain*` clone of this session was deleted by its script; none left.
+  `prefix-dev-base-A/B` belong to P0-HARNESS. No wine processes of mine are running. GPU "Recovery Action: None"
+  before and after every Wine run (no D3D device is created by these tools).

@@ -75,8 +75,8 @@ temp root, `diff -rq` against the original showed only the `.flmod-pin` stamp).
 
 | Name | Pin | Source | sha256 / commit | Dest |
 |---|---|---|---|---|
-| FLUF | `nightly-2026-10-16-03-03`, FLUF commit `627ea2c` | `/home/user/freelancer/refs/FLUF-release-nightly-2026-10-16/FLUF.tar.xz` (local) | `74a8147de6a957de67f910cc16b951e9047e68a8a848087168bd515f7ecd3a65` | `FLUF/` (`DATA`, `EXE`, `development`) |
-| FLUF-stable (fallback only) | `stable-2026-03-28-18-16` | `/home/user/freelancer/refs/FLUF-release-stable-2026-03-28/FLUF.tar.xz` (local) | `bd5635f2bcaa625258d9a0f7867c3151c6f29017491d3c83524d7841d830b390` | `FLUF-stable/` |
+| FLUF | `nightly-2026-10-16-03-03`, FLUF commit `627ea2c` | `/home/user/freelancer/refs/FLUF-release-nightly-2026-10-16/FLUF.tar.xz` (local); upstream release asset `https://codeberg.org/TheStarport/FLUF/releases/download/nightly-2026-10-16-03-03/FLUF.tar.xz` (used when the local file is missing) | `74a8147de6a957de67f910cc16b951e9047e68a8a848087168bd515f7ecd3a65` | `FLUF/` (`DATA`, `EXE`, `development`) |
+| FLUF-stable (fallback only) | `stable-2026-03-28-18-16` | `/home/user/freelancer/refs/FLUF-release-stable-2026-03-28/FLUF.tar.xz` (local); upstream `https://codeberg.org/TheStarport/FLUF/releases/download/stable-2026-03-28-18-16/FLUF.tar.xz` | `bd5635f2bcaa625258d9a0f7867c3151c6f29017491d3c83524d7841d830b390` | `FLUF-stable/` |
 | FLSDK | commit `ae8c85781e06dfe3b23546822d67bb07767670cd` | `git archive` of `/home/user/freelancer/refs/FLUF/vendor/FLSDK` (HEAD = that commit, VERIFIED); fallback clone `https://codeberg.org/TheStarport/FLSDK` | commit | `FLSDK/` |
 | reflect-cpp | commit `6bba1e2c4fa8de704c88d3f1712c157bbb6edc23` (FLUF's submodule pin, VERIFIED `git submodule status`) | `https://github.com/getml/reflect-cpp/archive/6bba1e2c4fa8de704c88d3f1712c157bbb6edc23.tar.gz` | `b8310d97a85ff8d6edb1de81350562d5bb20ad6fc29836d342cd77f7b57d0056` | `reflect-cpp/` |
 | magic_enum | v0.9.8 | `https://github.com/Neargye/magic_enum/releases/download/v0.9.8/magic_enum-v0.9.8.tar.gz` | `88709dc8a9697168a75e039470d73ed0cffbc17567976eb5e096f946a2c0d521` | `magic_enum/` |
@@ -85,12 +85,21 @@ temp root, `diff -rq` against the original showed only the `.flmod-pin` stamp).
 | doctest | v2.5.3 (commit `2d0a9359a60c51affe2a9bebb1be1dca47868151`) | `https://github.com/doctest/doctest/archive/2d0a9359a60c51affe2a9bebb1be1dca47868151.tar.gz` | `e64542c4ea68e9f381ccf6eae924cfdd652567c87c142d76fe92644fb4608149` | `doctest/` |
 | nlohmann/json | v3.11.3 single header | `https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp` | `9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6` | `nlohmann_json/include/nlohmann/json.hpp` |
 | nlohmann/json fwd | v3.11.3 | `https://github.com/nlohmann/json/releases/download/v3.11.3/json_fwd.hpp` | `5cefbba751baf5243033fd894c70be9b37103d64b3d3a959e4173197d71137b9` | `nlohmann_json/include/nlohmann/json_fwd.hpp` |
+| msvc-redist-x86 (tests; optional Track A fallback) | MSVC CRT redist **14.51.36231** x86 (VS package `Microsoft.VC.14.51.CRT.Redist.X86.base` 14.51.36247; same CRT version as the xwin splat's headers and libs) | `https://download.visualstudio.microsoft.com/download/pr/3984a6ef-2ffc-4c07-962e-bf9e9b862819/f13add6a0613d85b1ae6fbb52d9592dc1df6b43791ea375f2c32dda605e7aaec/Microsoft.VC.14.51.CRT.Redist.X86.base.vsix`; only `Contents/VC/Redist/MSVC/14.51.36231/x86/Microsoft.VC145.CRT/` is extracted | `f13add6a0613d85b1ae6fbb52d9592dc1df6b43791ea375f2c32dda605e7aaec` | `msvc-redist/x86/` (`vcruntime140.dll`, `vcruntime140_threads.dll`, `msvcp140.dll`, `msvcp140_1.dll`, `msvcp140_2.dll`, `msvcp140_atomic_wait.dll`, `msvcp140_codecvt_ids.dll`, `concrt140.dll`, `vccorlib140.dll`) |
+
+FLUF upstream URLs: both return HTTP 200 with a `content-length` equal to the local file's size (139359852 and
+55651208 bytes; VERIFIED 2026-10-18 with `curl -sIL`). Their sha256 was not re-checked against the upstream bytes
+(UNVERIFIED); `fetch_vendor.sh` refuses any download whose sha256 differs from the pin.
+
+The MSVC redist DLLs are a test input (`toolchain/ehprobe.sh --crt native`) and the optional app-local runtime
+discussed in `NOTES.md` "Question 3". They are Microsoft binaries: never commit them, never put them in a release.
 
 Notes:
 
 - Downloads are cached in `$FLMOD_VENDOR/.cache/dl/`; `fetch_vendor.sh --offline` re-extracts everything from the
   cache and `/home/user/freelancer/refs` without network (VERIFIED for doctest + nlohmann_json, 2026-10-17).
-  `fetch_vendor.sh --verify` re-hashes every source and checks every stamp.
+  `fetch_vendor.sh --verify` is offline and read-only: it re-hashes every source that is present, checks every
+  stamp, and re-hashes every installed tree against its `.flmod-manifest` (VERIFIED 11/11 OK, 2026-10-18).
 - Vendor trees are made read-only after extraction, so an accidental write from a build fails loudly.
 - FLSDK at `ae8c857` already contains `include/magic_enum/` (v0.9.8, VERIFIED `MAGIC_ENUM_VERSION_*`). The
   separate magic_enum pin exists so FLSDK's own CMake (`fetch_release(MAGIC_ENUM …)`) could run offline with
@@ -99,6 +108,9 @@ Notes:
 - ImGui: v1.93.0 (released 2026-10-14, three days before pinning) was skipped in favour of the last 1.92 point
   release (2026-07-31). Bumping is a one-line change in `fetch_vendor.sh`.
 - FLSDK has no license file (`README.md` has no license line; VERIFIED 2026-10-17). Its headers and import libs
-  are build inputs only and never committed.
+  are build inputs only and never committed. Built binaries are a different matter: Track B DLLs compile FLSDK's
+  own sources in (`flmod::flsdk_static`) and Track A modules statically link FLUF's prebuilt `FreelancerSDK.lib`,
+  so our DLLs embed FLSDK code. W5-SHIP must account for that before attaching any binary to a release:
+  `ABI.md` §7 (with the other licenses that end up inside the binaries, e.g. MinHook's BSD-2 notice).
 - The FLUF dev package needs one define beyond R1's must-match list: `LIBUUID_CPP20_OR_GREATER` (stduuid's
   `<uuid.h>`, pulled in by FLUF's `Utils/Random.hpp`, otherwise includes `<gsl/span>`, which the package lacks).
