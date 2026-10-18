@@ -20,7 +20,8 @@ log = logsetup.get("voice")
 class VoicePipeline:
     def __init__(self, profile: Profile):
         self.profile = profile
-        self._tasks: set[asyncio.Task] = set()
+        self._tasks: dict[asyncio.Task, object] = {}  # utterance task -> its session
+        self._session = None  # the session that owns the mic
         self.utterances = 0
         self.last_timing: dict = {}
 
@@ -31,15 +32,21 @@ class VoicePipeline:
 
     # ---- session lifecycle -------------------------------------------------------------
     def on_session_start(self, session) -> None:
+        self._session = session
         try:
-            self.profile.mic.open()
+            self.profile.mic.open()  # idempotent
         except Exception as exc:
             log.warning("mic open failed; voice input disabled", extra={"kv": {"err": repr(exc)[:200]}})
             self.profile.mic = NullMic()
 
     def on_session_end(self, session) -> None:
-        for task in list(self._tasks):
-            task.cancel()
+        # A replaced session can end after its successor started: only touch what it owns.
+        for task, owner in list(self._tasks.items()):
+            if owner is session:
+                task.cancel()
+        if session is not self._session:
+            return
+        self._session = None
         try:
             self.profile.mic.close()
         except Exception as exc:
@@ -53,8 +60,8 @@ class VoicePipeline:
             return
         log.info("ptt up", extra={"kv": {"sid": session.sid}})
         task = asyncio.ensure_future(self._utterance(session, time.perf_counter()))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._tasks[task] = session
+        task.add_done_callback(lambda t: self._tasks.pop(t, None))
 
     async def _utterance(self, session, t_up: float) -> None:
         p = self.profile

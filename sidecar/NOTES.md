@@ -75,6 +75,22 @@ Hypotheses:
 
 Status: 1 VERIFIED as the mechanism (both escape hatches fix it, and X itself was unresponsive). Why X stopped answering (2, 3, 9) is UNVERIFIED and outside this package; reported to the orchestrator. Fix: D11. The sidecar never needs D-Bus; in Adam's desktop session the variable is set and left alone.
 
+#### B-4: a replaced session's end closed the new session's mic (found in review)
+
+Sequence: B's hello replaces A → B's `session_start` opens the mic → A's cleanup runs later and its `session_end` closed the (shared) mic and cancelled every utterance task, including B's. Hypotheses for "mic closed while a game is connected":
+1. `on_session_end` is not per-session (it acts on shared state for any ending session). **Confirmed by reading the code.**
+2. Session end hooks run before start hooks of the successor (ordering), so close happens first and open second (harmless order).
+3. A's cleanup ran twice.
+4. `PttCapture.open()` is not idempotent and re-open fails silently.
+5. The registry calls end hooks for sessions that never started.
+6. A heartbeat timeout on A fires during replacement.
+7. `close()` called on the mic by the profile builder.
+8. Task cancellation of B's utterance raising into B's read loop.
+9. The test's fake mic not recording correctly.
+10. Server `_session_finished` clearing `active` for the wrong session.
+
+Experiment: `tests/test_pipeline.py::test_replacement_keeps_mic_open_for_new_session` fails on the old code (verified by swapping the old `pipeline.py` back in) and passes on the fix: the pipeline tracks the session that owns the mic and the session of each utterance task.
+
 #### B-3 (surprise, not a bug): Whisper CPU `int8` fallback is ~8–9 s for a 2 s clip
 
 R6 guessed 1–2 s. Measured 7.8–9.4 s (`20261018T044900Z-voice-smoke-cpu`). Hypotheses:

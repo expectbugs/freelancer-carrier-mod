@@ -26,7 +26,7 @@ Design rule (DESIGN §11): fast code handles split-second actions; the LLM sets 
   - not UTF-8, not JSON, not an object, or an envelope error → dropped (`malformed`);
   - longer than 64 KiB → skipped **up to and including its newline**, even if it arrives in many reads, so that the tail of an oversize line is never parsed as a new message (`oversize`);
   - a valid envelope with an invalid payload for a known type → dropped (`invalid`);
-  - unknown `t` → ignored (§9).
+  - unknown `t` → ignored (§10).
 
 ## 3. Envelope
 
