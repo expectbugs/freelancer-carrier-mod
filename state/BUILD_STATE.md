@@ -7,14 +7,14 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-6/7/8 deleted). Measured: `LANES=4` on DXVK (~195 fps each), `LANES_SW=2` on wined3d-sw; Track A must use vdesk mode. **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T05:55 (P0-REPO-b in review; HARNESS fix r1 + D107 switch)
+- **Last update:** 2026-10-18T09:03Z (P0-REPO-b merged + pushed; HARNESS fix r1 + D107 switch running)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
 1. Wait for the 5 running agents (table below). Each turn: check `STOP`, heartbeat, `local/gpu-fault.log`.
 2. After each fix report: save it to `state/reports/<ID>-f1.md`, then spawn a round-2 reviewer (`state/briefs/<ID>-r2.md` from REVIEWER_BRIEF_TEMPLATE; include the r1 findings and the f1 report). P0-HARNESS: save its report as `state/reports/P0-HARNESS-a1b.md` (attempt 1 continued); it gets its first review (r1) once it reports DONE.
 3. Merge order once each reviewer PASSes: P0-REPO first, squashed (D106; it brings the hooks and checker; then `git push origin main` after `tools/check_public.py --tree .` and `--commits` on the whole history; check the first Actions run), then the others. Run `python3 -I tools/check_public.py --commits=main..wp/<ID>` before every merge (squash per D106 if only intermediate commits fail), then `harness/ci.sh` after it.
-3a. DONE 05:25: REPO, TOOLCHAIN, SIDECAR, DATATOOLS merged and pushed; HARNESS told to merge main + D107. Next: HARNESS fix report → r2 review (resume ae9a5d0d12e392a5a) → merge HARNESS → fill {{MAIN_SHA}} in state/briefs/P0-TRACK-{A,B}.md and spawn both. In parallel: wp/P0-REPO-b follow-up → review by ad0f03e5949648e45 → --no-ff merge.
+3a. DONE 05:25: REPO, TOOLCHAIN, SIDECAR, DATATOOLS merged and pushed; HARNESS told to merge main + D107. Next: HARNESS fix report → r2 review (resume ae9a5d0d12e392a5a) → merge HARNESS → fill {{MAIN_SHA}} in state/briefs/P0-TRACK-{A,B}.md and spawn both.
 3b. After both DATATOOLS and HARNESS merge, harness deploy.py switches its dacom.ini block to a `harness.dacom` fltools.patch unit (D107).
 4. When P0-TOOLCHAIN and P0-HARNESS are merged: brief and spawn P0-TRACK-A and P0-TRACK-B in parallel.
 5. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
@@ -25,7 +25,7 @@ W4-ESC-* and FIX-* rows are appended when created.
 
 | ID | Wave | Type | Deps | Status | Attempts | Branch @ SHA | Merged | Notes |
 |---|---|---|---|---|---|---|---|---|
-| P0-REPO | 0 | impl | — | MERGED | 1 | wp/P0-REPO @ 04e73d3 | eb051ed (squash, D106) | r1/r2 CHANGES_REQUIRED, r3 PASS; first push 3404144, Actions PASS (3.11+3.13); follow-up wp/P0-REPO-b (D112: marker forms, escape hardening, image metadata) running with the same agent |
+| P0-REPO | 0 | impl | — | MERGED | 1 | wp/P0-REPO @ 04e73d3; wp/P0-REPO-b @ 4ea9a86 | eb051ed (squash, D106); follow-up 3fa47f6 | r1/r2 CHANGES_REQUIRED, r3 PASS; first push 3404144, Actions PASS (3.11+3.13); follow-up P0-REPO-b (D112) PASS + micro-fix, merged --no-ff, ci --full PASS |
 | P0-TOOLCHAIN | 0 | impl | — | MERGED | 1 | wp/P0-TOOLCHAIN @ 5825345 | 55013bf | r3 + r3b PASS; ci --full PASS after merge; EF-001..005. For TRACK-A/B briefs: see their draft addenda |
 | P0-HARNESS | 0 | impl | — | FIXING (r1) | 1 | wp/P0-HARNESS @ 181ebcc | | r1 CHANGES_REQUIRED (4 MAJOR: quit crash→PASS, reap races acquire, ack key order, false HANG on long cmds; 14 MINOR) → fix round 1 sent 04:35 (+D111, +baseline flock, +60 fps cap investigation). D107 switch: message the agent to `git merge main` once DATATOOLS is on main. D109 carried items. squash-merge (D106: a5bafe5). Merge HARNESS only after DATATOOLS |
 | P0-DATATOOLS | 0 | impl | — | MERGED | 1 | wp/P0-DATATOOLS @ 496fa64 | 4d3e5d5 (squash, D106) | r2 + r2b PASS; ci --full PASS after merge (365 + 361 pytest); note for W1-DATA brief: REQ-9 CLI conflicts with fltools/CONVENTIONS |
@@ -90,8 +90,6 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 
 | Agent name/id | Package | Role (impl/review) | Started | Notes |
 |---|---|---|---|---|
-| a98da3ea1147f6e70 | P0-REPO | impl (follow-up wp/P0-REPO-b) | 2026-10-18T01:44 | wp/P0-REPO-b DONE @ 2358ae4 (idle) |
-| ad0f03e5949648e45 | P0-REPO | review wp/P0-REPO-b | 2026-10-18T01:57 | resumed 05:55 for P0-REPO-b review |
 | aa760a6d5172501fc | P0-HARNESS | impl (fix r1) | 2026-10-18T01:44 | resumed 04:35 for fix round 1; told 05:25 that DATATOOLS is on main → merge main + D107 switch |
 | ae9a5d0d12e392a5a | P0-HARNESS | review r1 | 2026-10-18T03:30 | DONE 04:30: CHANGES_REQUIRED (state/reports/P0-HARNESS-r1.md) |
 
