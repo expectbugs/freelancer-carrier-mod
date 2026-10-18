@@ -7,7 +7,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-6/7/8 deleted). Measured: `LANES=4` on DXVK (~195 fps each), `LANES_SW=2` on wined3d-sw; Track A must use vdesk mode. **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T05:27 (4 P0 packages MERGED + pushed; Actions PASS; HARNESS fix r1 + D107 switch; REPO follow-up)
+- **Last update:** 2026-10-18T05:55 (P0-REPO-b in review; HARNESS fix r1 + D107 switch)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
@@ -90,8 +90,8 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 
 | Agent name/id | Package | Role (impl/review) | Started | Notes |
 |---|---|---|---|---|
-| a98da3ea1147f6e70 | P0-REPO | impl (follow-up wp/P0-REPO-b) | 2026-10-18T01:44 | merged; resumed 08:22Z for D112 follow-up |
-| ad0f03e5949648e45 | P0-REPO | review r3 (idle) | 2026-10-18T01:57 | r3 PASS ~05:00; resume to review wp/P0-REPO-b |
+| a98da3ea1147f6e70 | P0-REPO | impl (follow-up wp/P0-REPO-b) | 2026-10-18T01:44 | wp/P0-REPO-b DONE @ 2358ae4 (idle) |
+| ad0f03e5949648e45 | P0-REPO | review wp/P0-REPO-b | 2026-10-18T01:57 | resumed 05:55 for P0-REPO-b review |
 | aa760a6d5172501fc | P0-HARNESS | impl (fix r1) | 2026-10-18T01:44 | resumed 04:35 for fix round 1; told 05:25 that DATATOOLS is on main → merge main + D107 switch |
 | ae9a5d0d12e392a5a | P0-HARNESS | review r1 | 2026-10-18T03:30 | DONE 04:30: CHANGES_REQUIRED (state/reports/P0-HARNESS-r1.md) |
 
