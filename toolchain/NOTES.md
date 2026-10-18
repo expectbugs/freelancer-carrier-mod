@@ -92,3 +92,135 @@ FLUF.dll's export table (check_imports).
     `FreelancerSDK.lib`.
 11. Vendor trees are chmod read-only after extraction.
 12. DLLs keep DWARF (`/DEBUG:DWARF`) for `winedbg --gdb`; no stripped variant yet.
+
+## Bug 2: exception handling under Wine (review r1 MAJOR, 2026-10-18)
+
+Reviewer evidence: `$FLMOD_TESTRUNS/20261018T045813Z-review-P0-TOOLCHAIN-r1/` (R/13, 16, 23, 24, probe sources).
+
+**Observations** (all with the toolchain flags, DLL loaded by loadtest in a prefix-dev clone):
+
+- (a) At /O2 a function with `__try/__except` returns to its caller with EBX/ESI/EDI clobbered (caller values
+  b=0, c=1637915484). Its prologue saves no callee-saved registers. INTACT at /Od, and INTACT with
+  `__asm__ volatile("" ::: "ebx","esi","edi")` at the top of the `__try` function. (Cause VERIFIED by the reviewer's
+  disassembly: clang codegen.)
+- (b) `catch(...)` around `*(volatile int*)nullptr = 1` does not catch the access violation (exit code 5), even though
+  `/EHa` passes `-fasync-exceptions` to cc1 (VERIFIED: `clang-cl -###`). `__try/__except` around the same store
+  works with /EHa, and crashes with /EHsc.
+- (c) An exception leaving a catch block (`throw;`), caught by an enclosing try **in the same function**, kills the
+  process: /O2 and /Od, /EHa and /EHsc. The same pattern across a non-inlined call works; inlined, it crashes. The
+  outer catch body runs ("caught" is printed) and the process dies afterwards.
+- The reviewer's `WINEDEBUG=+seh` trace (R/14) for (c): cxx_frame_handler matches the inner catch(...), calls it;
+  the rethrow goes through `catch_function_nested_handler` ("detect rethrow"), matches the outer catch(int), unwinds
+  the nested frame, calls the outer catch, logs "done, continuing at 7BA9180E", then an access violation at
+  7BA918A7 (inside the *inner* catch funclet) with ebp=7bb0b50f (an address in Wine's msvcrt code).
+
+**Hypotheses for (b)** (each fits all observations):
+
+- B1. The `try` body contains no call, so clang sees nothing that can throw and drops the try region: the faulting
+  store lies outside every try state (async C++ EH in LLVM may be x64-only).
+- B2. clang emits the FuncInfo with `EHFlags & 1` (FUNC_DESCR_SYNCHRONOUS) even under /EHa on x86, and Wine's
+  `cxx_frame_handler` returns ContinueSearch for non-C++ exceptions.
+- B3. Wine's `find_catch_handler` never matches `catch(...)` for a non-C++ exception (e.g. catch(...) flagged
+  "std dot-dot" by clang).
+- B4. The handler is found but the catch funclet then crashes (as in (c)). Weak: nothing from the catch body prints.
+- B5. The trylevel/state is still -1 at the faulting instruction because clang stores the state number only before
+  invokes.
+- B6. Wine-proton's wow64 dispatch of 32-bit AVs skips C++ frame handlers. Weak: `__try/__except` works.
+- B7. /O2 reorders or hoists the store out of the try region; /Od would catch it.
+- B8. `-fasync-exceptions` is not forwarded on i686. Ruled out: `clang-cl -###` shows it.
+- B9. Wine requires `_set_se_translator` to deliver SEH into C++ handlers. Weak: Wine's source has a catch(...)
+  path for C exceptions.
+- B10. Native vcruntime140's FH3 would catch it (Wine-specific).
+
+**Hypotheses for (c)**:
+
+- C1. LLVM's x86 catch funclets store their own ESP into the registration node's SavedESP at entry
+  (`X86FrameLowering.cpp` llvmorg-22.1.8 lines 2137-2150: "If we're a catch funclet, we can be returned to via
+  catchret. Save ESP into the registration node so that the runtime will restore it for us."). Wine's
+  `call_catch_block` (proton_11.0 `dlls/msvcrt/except_i386.c`) snapshots `save_esp = frame[-1]` at its own start
+  and `continue_after_catch` resumes with that ESP. In the nested call (exception leaving the inner catch) the
+  snapshot is the inner funclet's ESP, so the parent's continuation runs on the funclet's stack and its epilogue
+  pops garbage. Predicts: any exception leaving a catch block to a same-frame try breaks (rethrow, new throw,
+  rethrow_exception), runtime-independent if MSVC's CallCatchBlock snapshots the same way.
+- C2. Wine's rethrow detection destroys the exception object twice; the crash is in the destructor path.
+- C3. clang emits wrong try-state ranges for nested trys in one function, so the wrong handler or unwind runs.
+- C4. Wine's RtlUnwind of the nested catch frame unlinks the parent's registration from fs:0, so the epilogue
+  restores a dead fs:0.
+- C5. Callee-saved registers are clobbered at the continuation (like (a)).
+- C6. Wine-specific: native vcruntime140 (MSVC's `__CxxFrameHandler3`) handles nested catches differently.
+- C7. Only `throw;` (rethrow detection, `ExceptionInformation[1..2] == 0`) breaks; throwing a *new* exception
+  from the catch block works.
+- C8. /EHa-specific (async EH tables). Ruled out by the reviewer: /EHsc also breaks.
+- C9. The funclet's `add $0xc, %ebp` frame conversion assumes Wine passes `&frame->ebp` = frame+12; nested calls
+  pass a different ebp. Weak: the trace shows the same ebp 0050FED8 both times.
+- C10. A try/catch nested *inside* the catch block (caught within the same funclet) also breaks.
+- C11. Exe vs DLL matters (e.g. loader/TLS differences in the EH globals).
+
+**Experiments** (one probe, `src/module/ehprobe/ehprobe.cpp`, built in variants; each case in its own process):
+
+- X1 `ehp_b_catchall_av_call` (AV inside a noinline callee) vs `_inline`: B1/B5 vs B2/B3.
+- X2 /Od variant: B7. X3 native vcruntime140 + msvcp140 from the 14.51 redist, app-local with
+  `WINEDLLOVERRIDES=vcruntime140,msvcp140=n,b`: B10, C6. X4 `ehp_c_throw_new_from_catch_same_frame`: C7.
+  X5 `ehp_base_catch_in_catch`: C10. X6 exe variant: C11. X7 /EHs, /EHsc, /EHsc+`-fasync-exceptions`, /Ob0
+  variants. X8 `WINEDEBUG=+seh` on the b-case: B2/B3 (flags, whether cxx_frame_handler is called at all).
+
+**Results** (run dirs under `$FLMOD_TESTRUNS/`: `20261018T053349Z-toolchain-eh-exp/` (full matrix, `matrix.txt`),
+`20261018T053642Z-toolchain-eh-exp2/`, `20261018T053801Z-toolchain-eh-exp3/` (`matrix.txt`)). Values are the case's
+return value; `rc5` = process killed by an unhandled exception. "native" = the 14.51.36231 `vcruntime140.dll` +
+`msvcp140.dll` from `Microsoft.VC.14.51.CRT.Redist.X86.base.vsix`, app-local, `WINEDLLOVERRIDES=vcruntime140,msvcp140=n,b`
+(`native_loaddll.txt` shows both loaded as `native`).
+
+| Case (expected) | EHa O2 | EHsc O2 | EHs O2 | EHa Od | EHsc+async | EHa Ob0 | exe EHa | native EHa | **EHa O2 +`-mstackrealign`** |
+|---|---|---|---|---|---|---|---|---|---|
+| base_* (7 cases) | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+| a_seh_regs_raw (1 = intact) | 0 | rc5 | rc5 | 1 | rc5 | 0 | 0 | 0 | 0 |
+| a_seh_regs_guarded (1) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+| b_catchall_av_inline (11) | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 |
+| b_catchall_av_call, nounwind callee (12) | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 |
+| b_catchall_av_opaque_call (13) | **13** | rc5 | – | – | – | – | – | 13 | 13 |
+| c_rethrow_same_frame (2) | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | **2** | **2** |
+| c_throw_new_from_catch_same_frame (1) | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | **1** | **1** |
+| c_rethrow_cross_noinline (2) | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
+| c_rethrow_cross_inlined (2) | rc5 | rc5 | rc5 | 2 | rc5 | 2 | rc5 | **2** | **2** |
+| c_rethrow_eptr_in_catch_same_frame (3) | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
+| lib_rethrow_if_nested_in_catch (5) | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | rc5 | **5** | **5** |
+| lib_vector_insert_throw (4) | rc5 / 4 | rc5 / 4 | rc5 | 4 | rc5 | 4 | rc5 | 4 | 4 |
+| json_parse_error (101), json_type_error (302), json_parse_no_exceptions (1) | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+| json_at_same_frame (401), json_at_wrapped (401) | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+
+(`lib_vector_insert_throw` "rc5 / 4": it crashed in the first build and passed once more cases were added to the
+TU, which changed the inliner's decisions.) `-mstack-alignment=16` alone changed nothing for (c).
+
+**Conclusions**
+
+- (a) Not fixed by any flag or runtime (/Od only hides it in the probe's caller; loadtest's own registers are still
+  corrupted). The clobber barrier fixes it everywhere (`a_seh_regs_guarded` = 1 in all 9 variants). It stays a
+  coding rule (ABI.md §6.1). VERIFIED.
+- (b) B1/B5 confirmed, B2/B3/B8/B10 ruled out. `catch(...)` does catch an access violation under /EHa when the fault
+  happens inside a call the compiler cannot prove `nounwind` (`b_catchall_av_opaque_call` = 13, builtin and
+  native). It never catches a fault in the function's own body or in a callee clang inferred `nounwind`: those
+  instructions are outside every try state (`WINEDEBUG=+seh`: "handling C exception code c0000005 … trylevel -1",
+  `seh_b_call.txt`). /EHsc never catches it. LLVM emits `EHFlags=0` under /EHa (`WinException.cpp:760-765`), so
+  Wine is not filtering it. Rule: never rely on `catch(...)` for SEH (ABI.md §6.2). VERIFIED.
+- (c) C1 confirmed: it is the interaction between LLVM's x86 catch-funclet ESP save and Wine's builtin
+  `call_catch_block` `save_esp` snapshot. MSVC's own `__CxxFrameHandler3` (native vcruntime140) handles it, so C6 is
+  true and the "runtime-independent" half of C1 is false. C7 ruled out (new throws break too), C10 ruled out
+  (catch-in-catch works), C11 ruled out (exe = DLL), C8 ruled out. `std::rethrow_exception` inside a catch happened
+  to work because of that function's epilogue shape.
+- **Toolchain fix for (c): `-mstackrealign`.** With forced stack realignment every EH function addresses its frame
+  through EBP/ESI, and the catchret continuation recomputes ESI from EBP and the epilogue restores ESP from EBP
+  (`lea -0xc(%ebp),%esp`), so the wrong ESP Wine hands back is never used (disassembly of
+  `ehp_c_rethrow_same_frame` in the exp3 build). All (c) cases pass with Wine's builtin CRT. It changes no
+  calling convention, struct layout or name mangling (each function realigns its own frame), so the MSVC ABI and
+  the FLUF must-match list are unaffected. Adopted in `clang-cl-i686.cmake` (attempt 1 fix round 1). VERIFIED.
+- Prebuilt code that we do not compile (FLUF.dll, FLUF's dev `.lib`s including `FreelancerSDK.lib`, yaml-cpp,
+  msgpack, zstd) does not get the flag. Under Wine's builtin CRT a same-frame catch-and-rethrow inside that code can
+  still crash. The native-CRT option fixes that too, but it changes the runtime of every DLL in the game process,
+  so it is a deployment decision for P0-HARNESS / P0-TRACK-A (reported as an open question).
+- nlohmann 3.11.3: `json::parse` errors are thrown from normal code (the SAX DOM parser), not from a catch block, so
+  they never hit (c) (`json_parse_error` = 101 in all variants). The only catch-and-throw site without
+  `JSON_DIAGNOSTICS` is `basic_json::at(size_type)` (array `at()`, json.hpp:21249 and 21272). MSVC STL catch-and-
+  rethrow sites (`_CATCH_ALL … _RERAISE`): `<vector>` range insert, `<istream>`/`__msvc_ostream.hpp` (`_CATCH_IO_END`),
+  `<future>`, `<iterator>`, `<syncstream>`, `<stacktrace>`, `<xlocale>`, `<iosfwd>`, `<yvals.h>`; plus
+  `std::throw_with_nested`/`std::rethrow_if_nested` when called inside a catch block. With `-mstackrealign` these
+  are safe in our own code (probe cases `lib_*`, `json_at_*`).

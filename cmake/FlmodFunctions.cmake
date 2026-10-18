@@ -70,6 +70,15 @@ function(flmod_dacom_dll target)
   _flmod_win32_common(${target})
 endfunction()
 
+# flmod_win32_dll(<target>): a plain win32 DLL with no Freelancer or hook libraries (tools, probes).
+function(flmod_win32_dll target)
+  if(FLMOD_HOST)
+    message(FATAL_ERROR "flmod_win32_dll(${target}) needs a win32 build")
+  endif()
+  target_link_libraries(${target} PRIVATE flmod::win32_defs)
+  _flmod_win32_common(${target})
+endfunction()
+
 # flmod_win32_exe(<target>): a win32 console tool (e.g. loadtest) placed in out/.
 function(flmod_win32_exe target)
   target_link_libraries(${target} PRIVATE flmod::win32_defs)

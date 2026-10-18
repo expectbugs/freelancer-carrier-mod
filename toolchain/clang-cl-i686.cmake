@@ -39,6 +39,12 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
 # switches the format to DWARF so gdb/lldb under Wine can read it.
 set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
 
+# -mstackrealign: forces every function with a frame to realign its stack, so EH functions address their
+# frame through EBP/ESI and restore ESP from EBP in the epilogue. That makes an exception that leaves a catch
+# block and is caught by a try in the same function safe under Wine's builtin vcruntime140: Wine resumes the
+# parent with the catch funclet's ESP (LLVM stores it into the EH registration node), and without this flag
+# the ESP-relative epilogue then pops garbage. Pure codegen: no calling-convention, layout or mangling change.
+# Evidence: toolchain/NOTES.md "Bug 2"; regression cases c_* / lib_* in src/module/ehprobe (toolchain/ehprobe.sh).
 set(_flmod_common_flags
   "/winsysroot \"${XWIN_ROOT}\""
   "-gdwarf"
@@ -47,6 +53,7 @@ set(_flmod_common_flags
   "-D_ITERATOR_DEBUG_LEVEL=0"
   "-Wno-microsoft-cast"
   "-Wno-cast-function-type-mismatch"
+  "/clang:-mstackrealign"
 )
 string(JOIN " " _flmod_common_flags ${_flmod_common_flags})
 set(CMAKE_C_FLAGS_INIT   "${_flmod_common_flags}")
@@ -54,7 +61,9 @@ set(CMAKE_CXX_FLAGS_INIT "${_flmod_common_flags} /EHa")
 
 # CMake's Windows-MSVC platform module appends "/EHsc" to CMAKE_CXX_FLAGS_INIT after this file runs,
 # and the last /EH flag wins. The rules-override file runs after the platform module and rewrites
-# /EHsc to /EHa (FLUF builds with /EHa; Freelancer exception handling needs it).
+# /EHsc to /EHa. /EHa (clang: -fasync-exceptions) is what FLUF builds with, and it is needed for a
+# __try/__except to catch a fault raised by an instruction inside the __try function itself (with /EHsc that
+# process dies; VERIFIED, NOTES.md "Bug 2"). It does NOT make catch(...) a reliable SEH catcher: see ABI.md §6.
 set(CMAKE_USER_MAKE_RULES_OVERRIDE "${CMAKE_CURRENT_LIST_DIR}/clang-cl-i686-overrides.cmake")
 
 # lld-link: /DEBUG:DWARF keeps the DWARF sections in the image (no PDB). /SAFESEH:NO is required for
