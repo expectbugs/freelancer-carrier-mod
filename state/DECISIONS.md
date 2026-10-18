@@ -152,3 +152,10 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
   - This is not a rewrite of main.
 - **Why:** keeps the strongest leak gate without blocking the first push, and needs no history rewriting on main.
 - **Decided by:** orchestrator
+
+## D107 — 2026-10-18 — dacom.ini marker clash: harness writes its block as an fltools.patch unit
+- **Context:** P0-DATATOOLS f1 open question. `harness/lib/deploy.py` (P0-HARNESS) writes its own `[Libraries]` block into `EXE/dacom.ini`; `gen` deploy (fltools.patch, P0-DATATOOLS) manages marker regions in the same file. Two independent writers to one file can strip or duplicate each other's blocks. Reading `patch.py`: `plan_overlay_patches` makes the install carry exactly gen's units, so a gen redeploy would strip any foreign unit.
+- **Options:** (a) two separate marker schemes and hope they never interleave; (b) one shared patch state: the harness writes a `harness.*` patch unit via `fltools.patch.patch_file`, and overlay planning preserves `harness.*` units; (c) the harness stops editing dacom.ini (not possible for Track B, which loads our DLL through `[Libraries]`).
+- **Choice:** (b). P0-DATATOOLS adds the `harness.*` preservation (with tests) now, before its round-2 review. The harness switches `deploy.py` to the patch unit after both packages are merged (P0-HARNESS fix round, or W1-HARNESS if HARNESS has already merged).
+- **Why:** one writer of record per file; reversible undeploy stays exact.
+- **Decided by:** orchestrator
