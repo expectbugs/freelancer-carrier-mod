@@ -100,9 +100,10 @@ game_run() {
 }
 
 selftest_dll_deploy() {
-  if [ ! -f "$SELFTEST_DLL_DIR/devbridge_selftest.dll" ]; then
-    bash "$HARNESS_DIR/devbridge/selftest_dll/build.sh" >> "$OUT/build.log" 2>&1 || return 1
-  fi
+  # always rebuild (a few seconds): a DLL left over from older sources would test the wrong code (review r2)
+  rm -f "$SELFTEST_DLL_DIR/devbridge_selftest.dll"
+  bash "$HARNESS_DIR/devbridge/selftest_dll/build.sh" >> "$OUT/build.log" 2>&1 || return 1
+  [ -f "$SELFTEST_DLL_DIR/devbridge_selftest.dll" ] || return 1
   echo "--artifacts $(realpath "$SELFTEST_DLL_DIR") --dacom-lib devbridge_selftest.dll"
 }
 
@@ -179,7 +180,7 @@ fi
 
 # ---------------------------------------------------------------- B post-campaign gate
 if want b_gate && [ $with_gate = 0 ]; then
-  record b_gate BLOCKED - "no input path to target the gate (T: empty contact list; clicks refused in space), NOTES.md N15; --with-gate runs it"
+  record b_gate BLOCKED - "needs the devbridge \`target\` verb (W1-SPAWN; the Phase-0 selftest DLL has none), NOTES.md N15; --with-gate runs it"
 elif want b_gate; then
   log="$OUT/b_gate.log"; li02=$(id_of Li02); li01=$(id_of Li01)
   cmds="$OUT/b_gate.cmds"

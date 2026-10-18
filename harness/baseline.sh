@@ -6,6 +6,7 @@
 #   baseline.sh show A|B                  print BASELINE.json
 # The play prefix is a clone source only; nothing here ever writes to it.
 # create/fluf-init hold $FLMOD_LOCKS/baseline-<T>.lock exclusively; lane.sh and deploy.sh clone under it shared.
+# fluf-init also needs input.lock (FLUF's first-run dialog) and takes it FIRST: global lock order in lib/common.sh.
 source /home/user/freelancer/carrier-mod/tools/env.sh
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/common.sh"
 set -u
@@ -92,9 +93,9 @@ fluf_launch() {
           Freelancer|"Default IME"|"") ;;
           "No ship classes")
             n=$((n+1)); timeout -s KILL 10 import -silent -window "$w" "$out/dialog$n.png" 2>/dev/null
-            # gated XTEST Return (input lock; focus/workspace/pid checks in lib/xinput.py; refuses rather than guess)
-            res=$(flock -w 900 "$FLMOD_LOCKS/input.lock" "$FLMOD_VENV/bin/python" -I "$HARNESS_DIR/lib/xinput.py" \
-                  --prefix "$p" --wid "$w" key Return 2>&1)
+            # gated XTEST Return; fluf-init already holds input.lock (lock order: input before baseline), and
+            # xinput.py --prefix verifies that an ancestor holds it
+            res=$("$FLMOD_VENV/bin/python" -I "$HARNESS_DIR/lib/xinput.py" --prefix "$p" --wid "$w" key Return 2>&1)
             echo "$(date -Is) dialog '$title' (wid $w) -> Return: $res" >> "$out/dialogs.txt"
             case "$res" in *input_refused*) rc=3; break 2 ;; esac
             sleep 2 ;;
@@ -129,7 +130,9 @@ cmd_verify() {
 case "${1:-}" in
   create)    [ $# -ge 2 ] || hdie "usage: baseline.sh create A|B [--recreate]"
              base_prefix "$2" >/dev/null; with_baseline_lock -x "$2" cmd_create "$2" "${3:-}" ;;
-  fluf-init) with_baseline_lock -x A cmd_fluf_init ;;
+  fluf-init) with_input_lock with_baseline_lock -x A cmd_fluf_init ;;   # lock order: input, then baseline
+  # test only (tests/test_lanes.sh): take fluf-init's locks in fluf-init's order, hold them <s> seconds, release
+  fluf-init-lock-probe) with_input_lock with_baseline_lock -x A sleep "${2:-5}" ;;
   verify)    [ $# -ge 2 ] || hdie "usage: baseline.sh verify A|B"
              base_prefix "$2" >/dev/null; with_baseline_lock -s "$2" cmd_verify "$2" ;;
   show)      cat "$(base_prefix "${2:?track}")/BASELINE.json" ;;

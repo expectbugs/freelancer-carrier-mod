@@ -1,5 +1,6 @@
 #!/bin/bash
-# CI stage 30 "pytest" (owner P0-DATATOOLS; CONVENTIONS §5, P0-REPO drop-in protocol).
+# CI stage 30 "pytest" (owner P0-DATATOOLS; harness root added by P0-HARNESS per D113; CONVENTIONS §5,
+# P0-REPO drop-in protocol).
 #
 # One pytest process per test root, each with its own cwd, config and interpreter, so the
 # roots' conftest modules and pytest configs never collide:
@@ -7,6 +8,9 @@
 #   sidecar    cwd <repo>/sidecar  $FLMOD_SIDECAR_VENV  pytest tests     (else $FLMOD_VENV;
 #                                                                      its audio tests skip)
 #   gen-tests  cwd <repo>          $FLMOD_VENV          pytest gen/tests
+#   harness    cwd <repo>          $FLMOD_VENV          pytest harness/tests  (D113; tests that need lanes, X, Wine or
+#                                                                      the GPU skip with a reason; lane suites run
+#                                                                      only with ci.sh --lanes N, CI_LANES)
 # A missing root (or one without pytest) is SKIP. Logs: $CI_RUNDIR/30-pytest/<root>.log.
 # Prints "CI pytest: PASS|FAIL|SKIP (<reason>)"; exits 0 / 1 / 77. Inputs: CI_MODE, CI_LANES,
 # CI_RUNDIR. CI_REPO_ROOT overrides the repo root (tests only).
@@ -52,6 +56,7 @@ sc_env="$venv"
 if has_pytest "$sidecar_venv"; then sc_env="$sidecar_venv"; fi
 run_root sidecar "$repo/sidecar" "$sc_env" tests
 run_root gen-tests "$repo" "$venv" gen/tests
+run_root harness "$repo" "$venv" harness/tests
 
 join() { local out; out="$(printf '%s; ' "$@")"; echo "${out%; }"; }
 if [ ${#failed[@]} -gt 0 ]; then

@@ -19,6 +19,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# never wait for (or stall) another agent's input: skip when input.lock is busy (exit 77 = skipped, see test_shell_suites.py)
+if ! flock -n "$FLMOD_LOCKS/input.lock" true; then echo "SKIP input.lock is held by another agent right now"; exit 77; fi
 out=$("$H/lane.sh" acquire --track B --lane 6 --keep-prefix --input --owner test_input_gate --wait 120 2>/dev/null)
 TOK=$(sed -n 's/^export LANE_TOKEN=//p' <<<"$out")
 [ -n "$TOK" ] || { echo "FAIL could not acquire lane 6 with --input"; exit 1; }
@@ -47,6 +49,10 @@ case "$r" in
 esac
 r=$("$PY" -I "$H/lib/xinput.py" --lane 6 check 2>&1)   # no --wid: the gate's own search must not pick it either
 case "$r" in *input_refused*) ok "gate's own window search refuses: $r" ;; *) bad "gate accepted without --wid: $r" ;; esac
+
+# the runner's own window search (find / validity / place / windowquit) applies the same X-Resource check (review r2)
+r=$("$PY" -I -c "import sys; sys.path.insert(0, '$H/lib'); import runner; print(runner.Run.pid_windows({$FAKE}, '^Freelancer\$'))" 2>&1)
+[ "$r" = "[]" ] && ok "runner.pid_windows ignores the forged window" || bad "runner.pid_windows returned $r for the forged window"
 
 # --prefix mode
 r=$("$PY" -I "$H/lib/xinput.py" --prefix /home/user/freelancer/prefix-lane-6 check 2>&1)
