@@ -1,0 +1,7 @@
+The r2b MINOR is fixed; new HEAD is **496fa64** on `wp/P0-DATATOOLS`.
+
+1. **Fix:** the validator no longer counts a reference section a unit adds (`[EncounterParameters]`, `[Room]`, `[MRoom]`, `[BaseInfo]`) as overlay content. A zone row now counts as overlay only by its zone, system file or encounter file, never by the encounter nickname. Either change alone stops the false ERRORs.
+2. **Test:** `test_vanilla_encounter_reused_in_a_new_zone_flags_nothing_else` declares a vanilla encounter in Li01 for a valid new `fcm_` zone, all picked at test time. It gives 0 ERROR/WARNING findings, and the related baselined E006 pair stays BASELINE. Each half of the fix is also asserted on its own. All 3 mutations fail the test: the old behaviour, and each half reverted alone.
+3. **Real overlay E006 is still an ERROR:** `test_overlay_warnings_become_errors` still passes.
+4. **Your probe set re-run:** the 3 Bw01/Bw09/Bw10 ERRORs are gone. FP6 still has 2 ERRORs, both genuine faults in the probe's own zone (no `path_label`, no `gunboats` formation for `li_n_grp`); every other probe is unchanged.
+5. **Results:** pytest with game data 139 passed; without game data 99 passed and 40 skipped, all for "HDE install not found". `check_public --tree` is OK on 148 files; `--commits` fails only on the 3 old D106 markers in 463eb68 and 1a99d13. No lock files leaked into the shared locks dir. Evidence is in `/home/user/freelancer/carrier-mod/local/testruns/20261018T081455Z-p0-datatools-r2b/`.
