@@ -7,7 +7,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-1/2 disposable; lane-6/7/8 leftovers HARNESS may delete). **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T02:47 (TOOLCHAIN fix r2; REPO, SIDECAR, DATATOOLS in r2 review; HARNESS running)
+- **Last update:** 2026-10-18T03:05 (REPO+TOOLCHAIN fix r2; SIDECAR+DATATOOLS in r2 review; HARNESS running)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
@@ -24,7 +24,7 @@ W4-ESC-* and FIX-* rows are appended when created.
 
 | ID | Wave | Type | Deps | Status | Attempts | Branch @ SHA | Merged | Notes |
 |---|---|---|---|---|---|---|---|---|
-| P0-REPO | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-REPO @ 32ab66a | | fix r1 DONE (f1 report; 183 tests); r2 reviewer running; squash-merge (D106); F9 blocklist entry added by orchestrator |
+| P0-REPO | 0 | impl | — | FIXING (r2) | 1 | wp/P0-REPO @ 32ab66a | | r2 CHANGES_REQUIRED (MAJOR: R5 false positives on our schemas → D108 authored-data escape; R5 misses compact JSON/flow YAML; 6 MINOR) → fix round 2 sent 03:05; after merge: convert the short tailnet blocklist entry to `w:` form, amend CONVENTIONS §12 per D108; squash-merge (D106) |
 | P0-TOOLCHAIN | 0 | impl | — | FIXING (r2) | 1 | wp/P0-TOOLCHAIN @ 0bceb22 | | r2 CHANGES_REQUIRED (MAJOR F1 lint rejects src/logic/**/tests doctest; MINOR F2–F7) → fix round 2 sent to the same agent 02:40; +load_proof --from dev baseline. For TRACK-A brief: stray-DLL assertion must cover ucrtbase*/concrt140*/msvcp1?0*; binary-scan FLUF catch funclets; confirm FLUF imports (d3dcompiler_47, opengl32, bcrypt, crypt32…) resolve in the lane prefix |
 | P0-HARNESS | 0 | impl | — | RUNNING (a1 continued) | 1 | wp/P0-HARNESS @ a5bafe5 | | report state/reports/P0-HARNESS-a1.md; RESUME POINT at top of harness/NOTES.md; first after reboot: Track A DXVK boot + dacom stricmp crash triage, concurrency, spew allow-lists, vdesk input gate |
 | P0-DATATOOLS | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-DATATOOLS @ 8eb78e3 | | fix r1 DONE + D107 addendum (120 tests); r2 reviewer running; squash-merge (D106: 463eb68/1a99d13 fail --commits); note for W1-DATA brief: REQ-9 CLI conflicts with fltools/CONVENTIONS |
@@ -89,8 +89,8 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 
 | Agent name/id | Package | Role (impl/review) | Started | Notes |
 |---|---|---|---|---|
-| a98da3ea1147f6e70 | P0-REPO | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE 01:52 @ 32ab66a (idle; resume via SendMessage for fix r2) |
-| ad0f03e5949648e45 | P0-REPO | review r2 | 2026-10-18T01:57 | |
+| a98da3ea1147f6e70 | P0-REPO | impl (fix r2) | 2026-10-18T01:44 | f1 DONE @ 32ab66a; resumed 03:05 for fix round 2 |
+| ad0f03e5949648e45 | P0-REPO | review r2 | 2026-10-18T01:57 | DONE 03:00: CHANGES_REQUIRED (state/reports/P0-REPO-r2.md) |
 | a51e1fa9688258fbd | P0-TOOLCHAIN | impl (fix r2) | 2026-10-18T01:44 | f1 DONE @ 0bceb22; resumed 02:40 for fix round 2 |
 | a3ce63ff4e332397d | P0-TOOLCHAIN | review r2 | 2026-10-18T02:03 | DONE 02:38: CHANGES_REQUIRED (state/reports/P0-TOOLCHAIN-r2.md) |
 | aa760a6d5172501fc | P0-HARNESS | impl (a1 cont.) | 2026-10-18T01:44 | from a5bafe5 |

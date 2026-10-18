@@ -472,7 +472,7 @@ The matrix, run by W5-COMPAT, with subsets per gate:
 
 | Order | Stage | Owner | What |
 |---|---|---|---|
-| — | `public` (built in) | P0-REPO | `tools/check_public.py` over `git ls-files -co --exclude-standard` (ignores `.claude/`; rejects files > 5 MB): no game files, extracts, `local/` content or secrets |
+| — | `public` (built in) | P0-REPO | `tools/check_public.py` over `git ls-files -co --exclude-standard` (ignores only `.claude/worktrees/`, per CONVENTIONS §5; rejects files > 5 MB): no game files, extracts, `local/` content or secrets |
 | 10 | build | P0-TOOLCHAIN | host (native clang++) and win32 (clang-cl i686) builds |
 | 20 | host-tests | P0-TOOLCHAIN | doctest suites discovered under `tests/host/**` and `src/**/tests/` |
 | 30 | pytest | P0-DATATOOLS | `$FLMOD_VENV/bin/python -m pytest` over the Python test dirs |
