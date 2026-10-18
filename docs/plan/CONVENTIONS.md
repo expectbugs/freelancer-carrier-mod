@@ -137,7 +137,7 @@ Key names are **`va_free_mb` / `va_largest_free_mb`**; `vmstat` prints the same 
   | 80 | soak-smoke | W1-HARNESS |
 
   A stage whose prerequisites don't exist yet reports **SKIP**, not FAIL.
-- **`tools/check_public.py`** lists files with `git ls-files -co --exclude-standard`, never walks the tree, and ignores `.claude/`. It rejects files larger than 5 MB.
+- **`tools/check_public.py`** lists files with `git ls-files -co --exclude-standard`, never walks the tree, and ignores `.claude/worktrees/` (amended 2026-10-18, P0-REPO review r1 F11: other `.claude/` files are scanned). It rejects files larger than 5 MB.
 
 ## 6. Fixtures [#15]
 

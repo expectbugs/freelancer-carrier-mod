@@ -102,3 +102,15 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
 - **Choice:** (b). Verified: `xfce4-screensaver-command -q` → inactive, inhibited by `flbuild`. Screen lock is disabled in xfconf (`/lock/enabled false`).
 - **Why:** an active screensaver window would cover lane windows for screenshots and synthetic input.
 - **Decided by:** orchestrator
+
+## D101 — 2026-10-18 — Git hooks path is absolute (main checkout)
+- **Context:** P0-REPO review r1 F4: the shared repo config holds `core.hooksPath=/home/user/freelancer/carrier-mod/.githooks` (absolute). Worktrees branched before P0-REPO merges have no `.githooks/` or checker of their own.
+- **Options:** relative `.githooks` (each worktree uses its own copy; pre-merge worktrees run no hook) vs absolute main-checkout path (every worktree runs main's hooks).
+- **Choice:** absolute. Hooks locate the checker relative to their own real path, so they use main's checker everywhere.
+- **Why:** the public-safety gate must apply to every agent commit, including sibling worktrees created before the hooks existed.
+- **Decided by:** orchestrator
+
+## D102 — 2026-10-18 — Public checker scope widened (P0-REPO review r1)
+- **Choice:** content sniffing for game binaries regardless of extension; YAML/JSON forms of FL data detected by FL-distinctive keys (not generic `nickname`/`faction`, so our authored YAML passes); decomp marker matched loosely in all code; a gitignored local fingerprint index of `$FLMOD_REFS` rejects copies of other mods' content (escape: `check_public: derived-from <repo> <SPDX>` header → warning); `--tree` skips only `.claude/worktrees/` (CONVENTIONS §5 amended). Infra literals added to the local blocklist.
+- **Why:** the reviewer showed 94% of real HDE INI files and 99% of decomp files passed the literal spec rules.
+- **Decided by:** orchestrator
