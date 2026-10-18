@@ -49,6 +49,7 @@ class Stats:
     refused: int = 0
     acks: int = 0
     ack_timeouts: int = 0
+    handler_errors: int = 0
     by_type: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -179,7 +180,14 @@ class Session:
                 line = await self._read_line()
                 if line is None:
                     break
-                await self._handle_line(line)
+                try:
+                    await self._handle_line(line)
+                except (ConnectionError, OSError):
+                    raise
+                except Exception:  # a bug while handling one line must never drop the game
+                    self.server.stats.handler_errors += 1
+                    log.exception("line handling failed; line dropped",
+                                  extra={"kv": {"sid": self.sid, "line": protocol.preview(line)}})
         except (ConnectionError, asyncio.IncompleteReadError, OSError) as exc:
             log.info("connection lost", extra={"kv": {"sid": self.sid, "err": repr(exc)}})
         finally:
@@ -276,7 +284,8 @@ class Session:
         if not msg:
             return
         t = msg["t"]
-        stats.by_type[t] = stats.by_type.get(t, 0) + 1
+        key = t if t in protocol.MESSAGES else "(unknown)"
+        stats.by_type[key] = stats.by_type.get(key, 0) + 1
         log.log(20 if t in ("hello", "bye") else 10, "recv", extra={"kv": {"sid": self.sid, "t": t, "seq": msg["seq"]}})
         seq = msg["seq"]
         if self.last_seq_in is not None and seq != self.last_seq_in + 1:
@@ -289,6 +298,11 @@ class Session:
         if not self.handshaken:
             stats.before_hello += 1
             if t == "ping":
+                errors = protocol.validate(msg)
+                if errors:
+                    stats.invalid += 1
+                    log.warning("invalid message dropped", extra={"kv": {"sid": self.sid, "t": t, "errors": errors[:5]}})
+                    return
                 await self.send("pong", **({"n": msg["n"]} if "n" in msg else {}))
             else:
                 log.info("ignored before hello", extra={"kv": {"sid": self.sid, "t": t}})
@@ -305,7 +319,8 @@ class Session:
                 await registry.dispatch(self, msg)
                 return
             first = t not in self._unknown_seen
-            self._unknown_seen.add(t)
+            if len(self._unknown_seen) < 64:
+                self._unknown_seen.add(t)
             log.log(30 if first else 10, "unknown message type ignored", extra={"kv": {"sid": self.sid, "t": t}})
             return
         if spec.direction == protocol.S2G:
@@ -357,17 +372,16 @@ class Session:
             return
         first = not self.handshaken
         self.hello = msg
-        self.handshaken = True
         if self._handshake_timer:
             self._handshake_timer.cancel()
-        if first:
-            await self.server._activate(self)
-            if self.closing:
-                return
         log.info("hello", extra={"kv": {"sid": self.sid, "dll": msg.get("dll"), "game": msg.get("game"),
                                         "repeat": not first}})
+        # welcome goes out before this session becomes active, so no command can precede it.
         await self.send("welcome", sidecar=__version__, features=list(self.server.features),
-                        heartbeat_ms=int(self.server.heartbeat_s * 1000), profile=self.server.profile_name)
+                        heartbeat_ms=int(round(self.server.heartbeat_s * 1000)), profile=self.server.profile_name)
+        self.handshaken = True
+        if first:
+            self.server._activate(self)
         ptt = msg.get("ptt_vk")
         if ptt is not None and self.server.ptt_vk is not None and ptt != self.server.ptt_vk:
             log.warning("DLL polls a different push-to-talk key than configured",
@@ -400,6 +414,7 @@ class SidecarServer:
         self._sids = itertools.count(1)
         self.port: int | None = None
         self.session_changed = asyncio.Event()
+        self._bg: set[asyncio.Task] = set()
 
     @classmethod
     def from_config(cls, cfg, registry: HandlerRegistry | None = None, features=(), profile_name="live"):
@@ -445,7 +460,7 @@ class SidecarServer:
         log.info("connection", extra={"kv": {"sid": sess.sid, "peer": sess.peer}})
         await sess.run()
 
-    async def _activate(self, sess: Session) -> None:
+    def _activate(self, sess: Session) -> None:
         old = self.active
         self.active = sess
         self.stats.sessions += 1
@@ -454,7 +469,10 @@ class SidecarServer:
             self.stats.replaced += 1
             log.info("new session replaces the old one", extra={"kv": {"old": old.sid, "new": sess.sid}})
             old.close_reason = "replaced"
-            await old.close("replaced", detail=f"replaced by session {sess.sid}")
+            # In the background: a stuck old peer (full send buffer) must not delay the new game.
+            task = asyncio.ensure_future(old.close("replaced", detail=f"replaced by session {sess.sid}"))
+            self._bg.add(task)
+            task.add_done_callback(self._bg.discard)
 
     def _session_finished(self, sess: Session) -> None:
         self.sessions.discard(sess)
@@ -481,6 +499,8 @@ class SidecarServer:
         for sess in list(self.sessions):
             await sess.close(reason if sess.handshaken else None, detail="sidecar stopping",
                              send_bye=sess.handshaken)
+        if self._bg:
+            await asyncio.wait(list(self._bg), timeout=2.0)
         for sess in list(self.sessions):
             try:
                 await asyncio.wait_for(sess.done.wait(), 2.0)

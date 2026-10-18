@@ -226,6 +226,9 @@ def validate(cfg: Config) -> None:
         val = cfg.get(key)
         if not isinstance(val, (int, float)) or isinstance(val, bool) or val <= 0:
             raise ConfigError(f"{key} must be a positive number, got {val!r}")
+    hb = cfg.get("server.heartbeat_s")
+    if not 0.01 <= hb <= 60:
+        raise ConfigError(f"server.heartbeat_s must be within 0.01..60, got {hb!r}")
     mp = cfg.get("server.missed_pongs")
     if not isinstance(mp, int) or isinstance(mp, bool) or mp < 1:
         raise ConfigError(f"server.missed_pongs must be an int >= 1, got {mp!r}")

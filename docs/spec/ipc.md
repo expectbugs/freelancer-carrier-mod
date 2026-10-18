@@ -19,11 +19,11 @@ Design rule (DESIGN §11): fast code handles split-second actions; the LLM sets 
 
 ## 2. Framing
 
-- **NDJSON:** one UTF-8 JSON **object** per line, terminated by `\n`. A trailing `\r` before the `\n` is tolerated and ignored. Empty lines are ignored.
+- **NDJSON:** one UTF-8 JSON **object** per line, terminated by `\n`. A trailing `\r` before the `\n` is tolerated and ignored. Empty and whitespace-only lines are ignored.
 - **Size:** a line, including its `\n`, is at most **65 536 bytes** (64 KiB). Senders never produce a longer line.
-- **Encoding:** compact JSON (`ensure_ascii` off). `NaN` and `Infinity` are invalid. JSON string escaping means a message can never contain a raw newline.
+- **Encoding:** compact JSON (`ensure_ascii` off). `NaN`, `Infinity` and numbers that overflow a double (for example `1e400`) are invalid, and so are `\uD800`–`\uDFFF` escapes that do not form a surrogate pair. JSON string escaping means a message can never contain a raw newline.
 - **Receiver behaviour on a bad line** (both sides). The line is logged and dropped; the connection stays up:
-  - not UTF-8, not JSON, not an object, or an envelope error → dropped (`malformed`);
+  - not UTF-8, not JSON (including nesting too deep to parse), not an object, or an envelope error → dropped (`malformed`);
   - longer than 64 KiB → skipped **up to and including its newline**, even if it arrives in many reads, so that the tail of an oversize line is never parsed as a new message (`oversize`);
   - a valid envelope with an invalid payload for a known type → dropped (`invalid`);
   - unknown `t` → ignored (§10).
@@ -38,7 +38,7 @@ Every message is a JSON object with these fields:
 | `t` | string | both | Message type, 1–64 chars (§6–§8). |
 | `seq` | int ≥ 0 | both | Per direction, per connection: starts at 1 and increases by 1 per message. Receivers log gaps and regressions but never reject on them. |
 | `gt` | int ≥ 0 | DLL only | Game time in ms on the DLL side. The DLL always sends it (0 when no game is loaded); it may restart after a load. The sidecar omits it. Receivers tolerate its absence. |
-| `id` | string | commands, acks | `^[A-Za-z0-9_.:-]{1,32}$`. The sidecar uses `c-<n>`, unique per connection. A top-level `id` means a command id and nothing else: payloads name object ids differently (`obj`, `wing`, `carrier`). |
+| `id` | string | commands, acks | `[A-Za-z0-9_.:-]{1,32}` (whole string; patterns in this spec always match the whole value). The sidecar uses `c-<n>`, unique per connection. A top-level `id` means a command id and nothing else: payloads name object ids differently (`obj`, `wing`, `carrier`). |
 
 Payload fields sit next to the envelope fields (flat, no nesting under a `payload` key).
 
@@ -120,7 +120,7 @@ Sidecar → DLL. The reply to a supported `hello`.
 |---|---|---|---|
 | `sidecar` | name | yes | sidecar version |
 | `features` | list of string | yes | subset of `stt`, `tts`, `llm`, `grammar`: what this sidecar can do right now. If `tts` is present the DLL may leave dynamic lines to the sidecar (reflex callouts stay local). |
-| `heartbeat_ms` | int 100–60000 | opt | the ping interval the sidecar uses (2000) |
+| `heartbeat_ms` | int 10–60000 | opt | the ping interval the sidecar uses (2000; tests use less) |
 | `profile` | string | opt | `live` or `test` (informational, for logs) |
 
 #### `bye`
@@ -282,14 +282,14 @@ Strict: an unknown field fails the whole command with `err:"unknown_field"`, so 
 | Field | Type | Req | Rule |
 |---|---|---|---|
 | `scope` | string | yes | `player` or `carrier` |
-| `carrier` | name | opt | with `scope:"carrier"`: one carrier's id. Absent = the default policy shared by all carriers |
+| `carrier` | name | opt | only with `scope:"carrier"` (otherwise `bad_value`): one carrier's id. Absent = the default policy shared by all carriers |
 | policy fields | | ≥ 1 | any subset of the Policy object (§5) |
 
 Example: "save nanobots for the cruiser" → `{"t":"policy.set","id":"c-4","scope":"player","bots_reserve":7,"release_reserve_when":"capital_hostile_present"}`.
 
 #### `act`
 
-One-shot action, executed like the native key; refused (`not_now`) when impossible (docked, no stock, dead). `do` (req) `use_bots` or `use_batts`; `scope` (opt) `player` (default) or `carrier`; `carrier` name (opt).
+One-shot action, executed like the native key; refused (`not_now`) when impossible (docked, no stock, dead). `do` (req) `use_bots` or `use_batts`; `scope` (opt) `player` (default) or `carrier`; `carrier` name (opt; only with `scope:"carrier"`).
 
 #### `wing.formation`
 
@@ -305,7 +305,7 @@ Reserved for W4-WINGMEN. `order` (req): `follow`, `engage`, `hold`, `retreat`, `
 
 #### `wing.policy`
 
-Reserved for W4-WINGMEN. Strict like `policy.set`. `retreat_hull_below` number (clamped by the DLL to [0.05, 0.95]).
+Reserved for W4-WINGMEN. Strict like `policy.set`. `retreat_hull_below` number (req; clamped by the DLL to [0.05, 0.95]).
 
 #### `say`
 

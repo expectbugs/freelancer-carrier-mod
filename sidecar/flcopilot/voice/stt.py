@@ -51,6 +51,7 @@ class FakeTranscriber:
     """Deterministic test-profile transcriber: returns the configured text for any clip."""
 
     name = "fake"
+    accepts_empty = True  # answers even without audio (NullMic), so the test profile is deterministic
 
     def __init__(self, text: str):
         self.text = text
@@ -122,6 +123,8 @@ class WhisperEngine:
 
         from ..audio.dsp import resample
 
+        if clip is None or len(clip) == 0:
+            return TranscriptResult(text="", device=self.device, compute_type=self.compute_type)
         pcm = np.asarray(clip, dtype=np.float32)
         if sample_rate != 16000:
             pcm = resample(pcm, sample_rate, 16000)

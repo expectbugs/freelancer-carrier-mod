@@ -72,6 +72,9 @@ class VoicePipeline:
             if p.transcriber is None:
                 log.info("no speech-to-text in this profile yet; utterance dropped")
                 return
+            if clip is None and not getattr(p.transcriber, "accepts_empty", False):
+                log.info("no audio captured; utterance dropped", extra={"kv": {"sid": session.sid}})
+                return
             result = await asyncio.to_thread(p.transcriber.transcribe, clip)
             timing["stt_ms"] = round((time.perf_counter() - t_up) * 1000, 1)
             text = (result.text or "").strip()

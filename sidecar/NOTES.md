@@ -73,7 +73,7 @@ Hypotheses:
 9. The X server is busy with heavy screenshots from a lane (slow, not dead).
 10. An ALSA plugin from the ALSA config (enumerated by PortAudio) uses D-Bus.
 
-Status: 1 VERIFIED as the mechanism (both escape hatches fix it, and X itself was unresponsive). Why X stopped answering (2, 3, 9) is UNVERIFIED and outside this package; reported to the orchestrator. Fix: D11. The sidecar never needs D-Bus; in Adam's desktop session the variable is set and left alone.
+Status: 1 VERIFIED as the mechanism (both escape hatches fix it, and X itself was unresponsive). The full test suite passed in 5.3 s while X was still stalled, with the conftest fix in place. By about 05:15Z the same X connect worked again, so the stall was transient. Why X stopped answering (2, 3, 9) is UNVERIFIED and outside this package; reported to the orchestrator. Fix: D11. The sidecar never needs D-Bus; in Adam's desktop session the variable is set and left alone.
 
 #### B-4: a replaced session's end closed the new session's mic (found in review)
 
@@ -90,6 +90,38 @@ Sequence: B's hello replaces A → B's `session_start` opens the mic → A's cle
 10. Server `_session_finished` clearing `active` for the wrong session.
 
 Experiment: `tests/test_pipeline.py::test_replacement_keeps_mic_open_for_new_session` fails on the old code (verified by swapping the old `pipeline.py` back in) and passes on the fix: the pipeline tracks the session that owns the mic and the session of each utterance task.
+
+#### B-5: self-review findings (independent review agent, 2026-10-18)
+
+An independent read-only review found 9 defects that the suite did not catch. Each now has a regression test in `tests/test_review_regressions.py`. 33 of those tests fail on the pre-fix sources (checked by swapping the committed files back in) and all pass on the fix.
+
+| # | Defect | VERIFIED by | Fix |
+|---|---|---|---|
+| 1 | A JSON array nested ~20 000 deep (fits in 40 KB) raised `RecursionError` out of `decode` and the read loop, dropping the game's connection | reviewer experiment, then our test | `decode` maps `RecursionError` to `json`; the read loop also contains any exception per line (`handler_errors` stat) |
+| 2 | Pre-hello `ping` echoed an unchecked `n`: `1e400` (→ inf) and a lone `\ud800` made encoding the pong raise and dropped the connection; `{"x":…}` was echoed out of schema; `1e400` slipped into untyped fields | reviewer experiment | `decode` rejects overflowing floats and lone surrogates; pre-hello pings are validated |
+| 3 | PTT pressed again within the 150 ms tail: the second utterance was lost, and `transcribe(None)` was called | reviewer experiment | `ptt_down` during a tail finalizes the first clip; the pipeline skips `None` clips for real transcribers; `WhisperEngine` short-circuits empty clips |
+| 4 | A duplicate `ptt{down:false}` orphaned a future whose timeout stole the next utterance's audio | reviewer experiment | a second release while the tail is pending returns `None`; the timeout path only takes the buffer if the pending future is its own and uses `asyncio.wait` (no cancel) |
+| 5 | Regex `$` accepted a trailing newline (`"copilot\n"`, `"c-1\n"`) | reviewer experiment | `fullmatch` everywhere |
+| 6 | `welcome.heartbeat_ms` could leave its own schema range | reviewer | schema 10–60000; config bounds `heartbeat_s` to 0.01–60 |
+| 7 | A replacing session was "active" before its `welcome`, and the old peer's close could delay it | UNVERIFIED by the reviewer; our test checks the order now | `welcome` first, then activate; the old session is closed in a background task |
+| 8 | A failed `InputStream.start()` leaked the stream | UNVERIFIED by the reviewer; our mock test confirms the fix | close on failure; set `_stream` only after start |
+| 9 | fakegame could pass vacuously: no checks on sidecar output, `"skip":"false"` was true, typos ignored, `disconnect:false` acted, acks echoed instead of the full policy | reviewer reading | strict envelope checks, step validation, a fake-DLL policy model with the spec's clamps |
+
+Spec fixes from the same review: `wing.policy.retreat_hull_below` is required; `carrier` is only valid with `scope:"carrier"`; patterns match whole values; overflowing numbers and lone surrogates are invalid; whitespace-only lines are ignored. Also: `stats.by_type` and the unknown-type set are now bounded.
+
+Hypotheses for the most serious one (#1, a single line drops the connection), before the experiment:
+1. An exception type that `decode` does not catch (`RecursionError`, `MemoryError`, `OverflowError`).
+2. An exception in a registry handler that `_call` does not catch (`BaseException` subclasses).
+3. An encode failure while replying (non-finite or unencodable values echoed back).
+4. `LimitOverrunError` handling consuming the wrong number of bytes.
+5. The send drain timeout propagating as `TimeoutError` (an `OSError`), which ends `run()` on purpose.
+6. A `KeyError` in `_handle_line` on a message that passes the envelope check but lacks a field read directly.
+7. Validation recursing on deep data (the schema walker is bounded by schema depth, not data depth).
+8. The surrogate check recursing on deep data (made iterative for this reason).
+9. Stats bookkeeping raising (an unhashable `t`; `t` is checked to be a string first).
+10. Cancellation from replacement arriving mid-line.
+
+The experiment (the reviewer's script, then our parametrized test over four hostile lines, before and after hello) confirmed 1 and 3. The per-line guard also covers 2, 6 and 9. Hypothesis 5 is intended behaviour: a peer that stops reading is dropped.
 
 #### B-3 (surprise, not a bug): Whisper CPU `int8` fallback is ~8–9 s for a 2 s clip
 
@@ -121,10 +153,12 @@ Measured for the 5-word phrase in voice `am_michael` while game lanes were runni
 | `20261018T044900Z-voice-smoke-cpu` | pass on cpu/int8; stt_ms 9351 (B-3) |
 | `20261018T050000Z-sidecar-selftest` | `SELFTEST ok port=29170 … loopback_only=True … shutdown_bye=shutdown port_closed_after=True` |
 | `20261018T050200Z-sidecar-ss` | `ss -ltnp`: `127.0.0.1:29170` only; no IPv6 listener; SIGTERM exit 0; no listener after |
+| flood (scratch script) | 20 000 `ev.hit` + `state` lines pushed back to back: all 20 021 lines processed, 0 invalid; the first `pong` after the burst took 184 ms (backlog), then median 0.06 ms. Planned load is ≤ 50 msg/s. |
+| `20261018T051000Z-…-x20`, `20261018T053000Z-…-x20` | full suite 20× each, 0 failures (TESTING §Layers flakiness rule) |
 | `20261018T050300Z-sidecar-mic-discovery` | `mic: resolved index=63 matches=1` (name in the local log only) |
 
 ### Open items for later packages
 
 - W1-SIDECAR: verify `PULSE_SOURCE` + PortAudio `pulse` device actually selects the resolved source (capture.py comment); wire WhisperEngine/KokoroEngine into the live profile; the speech queue; the grammar.
 - W2-REFLEX: ipc.md §11 is the DLL contract. Test against `tools/fakegame.py` inverted, or run the real sidecar with `--profile test`.
-- Harness: run sidecar tests with `$FLMOD_SIDECAR_VENV/bin/pytest -q sidecar/tests`. Under the shared `$FLMOD_VENV` (no numpy/sounddevice/kokoro) 198 pass and 7 skip with a reason.
+- Harness: run sidecar tests with `$FLMOD_SIDECAR_VENV/bin/pytest -q sidecar/tests`. Under the shared `$FLMOD_VENV` (no numpy/sounddevice/kokoro) the audio-library tests skip with a reason and the rest pass.

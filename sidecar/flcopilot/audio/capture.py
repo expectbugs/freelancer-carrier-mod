@@ -109,9 +109,14 @@ class PttCapture(Mic):
             os.environ["PULSE_SOURCE"] = self.source_name
             if device in (None, "", "default"):
                 device = "pulse"
-        self._stream = sounddevice.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32",
-                                               blocksize=self.block, device=device, callback=self._callback)
-        self._stream.start()
+        stream = sounddevice.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32",
+                                         blocksize=self.block, device=device, callback=self._callback)
+        try:
+            stream.start()
+        except Exception:
+            stream.close()  # never leak a half-open PortAudio stream
+            raise
+        self._stream = stream
         log.info("capture stream open", extra={"kv": {"rate": self.sample_rate, "device": str(device)}})
 
     def close(self) -> None:
@@ -162,8 +167,12 @@ class PttCapture(Mic):
 
     def ptt_down(self) -> None:
         with self._lock:
+            if self._recording and self._tail_left is None:
+                return  # already held (duplicate down)
             if self._recording:
-                return
+                # Pressed again during the previous release's tail: cut that tail short and hand
+                # its clip over now, so the new utterance starts its own recording.
+                self._finalize_locked()
             self._recording = True
             self._chunks = list(self._ring)
             self._rec_len = self._ring_len
@@ -176,22 +185,27 @@ class PttCapture(Mic):
         """The clip (pre-roll + speech + tail) as float32, or None if PTT was not down."""
         loop = asyncio.get_running_loop()
         with self._lock:
-            if not self._recording:
-                return None
+            if not self._recording or self._fut is not None:
+                return None  # not held, or a duplicate release while the tail is pending
             fut = loop.create_future()
             self._fut = (loop, fut)
             self._tail_left = self.tail_samples
             if self.tail_samples <= 0:
                 self._finalize_locked()
-        try:
-            return await asyncio.wait_for(fut, self.tail_s + self.tail_grace_s)
-        except asyncio.TimeoutError:
-            # The stream stopped delivering (device gone): hand over what we have.
-            with self._lock:
+        # asyncio.wait (unlike wait_for) never cancels fut, so a result set concurrently is not lost.
+        await asyncio.wait({fut}, timeout=self.tail_s + self.tail_grace_s)
+        if fut.done():
+            return fut.result()
+        with self._lock:
+            mine = self._fut is not None and self._fut[1] is fut
+            if mine:
+                # The stream stopped delivering (device gone): hand over what we have.
                 clip = self._take_locked()
                 self._fut = None
+        if mine:
             log.warning("capture tail timed out; using partial clip")
             return clip
+        return await fut  # finalized just now by the callback thread; the result is in flight
 
     def _take_locked(self):
         import numpy as np

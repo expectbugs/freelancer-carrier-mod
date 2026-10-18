@@ -179,7 +179,7 @@ MESSAGES: dict[str, Msg] = {
     "welcome": Msg(S2G, CONTROL, {
         "sidecar": _name(True, doc="sidecar version"),
         "features": F("list", required=True, items=F("str", enum=FEATURES), max_items=16),
-        "heartbeat_ms": F("int", min=100, max=60000),
+        "heartbeat_ms": F("int", min=10, max=60000),
         "profile": F("str", enum=("live", "test")),
     }, doc="reply to a hello with a supported version"),
     "bye": Msg(BOTH, CONTROL, {
@@ -280,7 +280,7 @@ MESSAGES: dict[str, Msg] = {
     "wing.order": Msg(S2G, COMMAND, {
         "order": F("str", required=True, enum=WING_ORDERS), "wing": _name(doc='wing id or "all" (default)'),
     }, reserved_for="W4-WINGMEN"),
-    "wing.policy": Msg(S2G, COMMAND, {"retreat_hull_below": F("num")}, strict=True,
+    "wing.policy": Msg(S2G, COMMAND, {"retreat_hull_below": F("num", required=True)}, strict=True,
                        reserved_for="W4-WINGMEN"),
     "say": Msg(S2G, COMMAND, {
         "speaker": F("str", required=True, pattern=SPEAKER_RE),
@@ -337,7 +337,7 @@ def _check_value(path: str, spec: F, value: Any, strict: bool, errors: list[str]
         errors.append(f"{path}: {value} > {spec.max}")
     if spec.maxlen is not None and t == "str" and len(value) > spec.maxlen:
         errors.append(f"{path}: longer than {spec.maxlen}")
-    if spec.pattern is not None and t == "str" and not spec.pattern.match(value):
+    if spec.pattern is not None and t == "str" and not spec.pattern.fullmatch(value):
         errors.append(f"{path}: {value!r} does not match {spec.pattern.pattern}")
     if t == "obj" and spec.schema is not None:
         _check_fields(path, spec.schema, value, strict, errors)
@@ -379,7 +379,7 @@ def validate_envelope(msg: Any) -> list[str]:
         errors.append("seq: missing or not an int >= 0")
     if "gt" in msg and (not _is_int(msg["gt"]) or msg["gt"] < 0):
         errors.append("gt: not an int >= 0")
-    if "id" in msg and (not isinstance(msg["id"], str) or not COMMAND_ID_RE.match(msg["id"])):
+    if "id" in msg and (not isinstance(msg["id"], str) or not COMMAND_ID_RE.fullmatch(msg["id"])):
         errors.append("id: not a valid command id")
     return errors
 
@@ -403,6 +403,8 @@ def validate(msg: Any) -> list[str]:
     _check_fields("", spec.fields, msg, spec.strict, errors, skip=ENVELOPE_FIELDS)
     if msg["t"] == "policy.set" and not any(k in msg for k in POLICY_FIELDS):
         errors.append("policy.set: no policy field given")
+    if msg["t"] in ("policy.set", "act") and "carrier" in msg and msg.get("scope", "player") != "carrier":
+        errors.append("carrier: only allowed with scope=carrier")
     if msg["t"] == "ack":
         if msg.get("ok") is False and "err" not in msg:
             errors.append("err: missing (ok=false acks carry an err code)")
@@ -436,9 +438,11 @@ def decode(line: bytes) -> dict:
     except UnicodeDecodeError as exc:
         raise ProtocolError("utf8", str(exc)) from None
     try:
-        obj = json.loads(text, parse_constant=_reject_constant)
-    except ValueError as exc:
-        raise ProtocolError("json", str(exc)) from None
+        obj = json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float)
+    except (ValueError, RecursionError) as exc:  # RecursionError: absurdly deep nesting
+        raise ProtocolError("json", str(exc)[:200]) from None
+    if "\\u" in text and _has_lone_surrogate(obj):
+        raise ProtocolError("utf8", "lone surrogate escape")
     if not isinstance(obj, dict):
         raise ProtocolError("not_object", type(obj).__name__)
     env = validate_envelope(obj)
@@ -449,6 +453,32 @@ def decode(line: bytes) -> dict:
 
 def _reject_constant(name: str):
     raise ValueError(f"non-finite number {name} is not allowed")
+
+
+def _finite_float(text: str) -> float:
+    val = float(text)
+    if val in (float("inf"), float("-inf")):
+        raise ValueError(f"number {text[:32]} overflows to infinity")
+    return val
+
+
+def _has_lone_surrogate(obj) -> bool:
+    """True if any string holds a lone UTF-16 surrogate (from a \\uD8xx escape): it cannot be
+    re-encoded as UTF-8. Iterative, so deep nesting cannot overflow the stack."""
+    stack = [obj]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            try:
+                cur.encode("utf-8")
+            except UnicodeEncodeError:
+                return True
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur)
+    return False
 
 
 def ptt_vk(name_or_code: str | int) -> int:

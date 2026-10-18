@@ -33,6 +33,11 @@ def test_script_policy_roundtrip(fakegame):
             assert app.profile.brain.calls == ["save nanobots for the cruiser"]
             assert app.profile.sink.plays == 1  # the spoken line went to the null sink
             assert app.server.stats.acks == 2 and app.server.stats.ack_timeouts == 0
+            acks = [m for m in game.sent if m["t"] == "ack"]
+            assert acks[0]["ok"] is True
+            assert acks[0]["applied"] == {**fakegame.DEFAULT_POLICY, "bots_reserve": 7,
+                                          "release_reserve_when": "capital_hostile_present"}
+            assert game.violations == []
     run(body())
 
 

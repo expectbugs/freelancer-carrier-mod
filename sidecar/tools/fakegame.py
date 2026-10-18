@@ -24,14 +24,22 @@ are ignored. Directives:
     {"expect_closed": true, "timeout": 2}     the sidecar must close the connection
     {"expect_silence": 0.5}                   no message other than ping for 0.5 s
     {"ack": {"ok": true, "applied": {...}, "err": "...", "detail": "..."}}
-                                              ack the most recent command (default applied =
-                                              an echo of the command's fields)
+                                              ack the most recent command. Default applied: for
+                                              policy.set, the full policy after the DLL's clamps
+                                              (or ok:false with unknown_field/bad_value), as a
+                                              real DLL would; otherwise an echo of the fields
     {"ptt": "down" | "up"}  or  {"ptt": "tap", "hold_ms": 200}
     {"sleep": 0.1}
     {"auto_pong": false}                      stop answering the sidecar's pings
     {"disconnect": true}
     {"connect": true, "hello": true}          (re)connect, then send hello unless "hello": false
     {"comment": "..."}
+
+Every step is checked: an unknown directive, an unknown extra key (a typo such as "timout"), a
+non-boolean flag, or "disconnect"/"expect_closed"/"connect" not set to true is an error, so a
+broken script fails instead of passing. In strict mode (the default) every message from the
+sidecar is also checked against the envelope rules: v = 1, consecutive seq from 1 per
+connection, no gt, an id on every non-control message, at most 64 KiB per line.
 
 Pattern values: literals compare equal (bool is not int); objects match as subsets; lists
 match element-wise. Special strings: "$any", "$int", "$num", "$str", "$bool", "$list",
@@ -53,10 +61,16 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 29170
 PROTOCOL_VERSION = 1
 
+MAX_LINE_BYTES = 65536
+
 DEFAULT_POLICY = {
     "auto_bots": True, "bots_hull_below": 0.5, "bots_reserve": 0, "critical_hull": 0.25,
     "release_reserve_when": "never", "auto_batts": True, "batts_shield_below": 0.25, "batts_reserve": 0,
 }
+# The fake DLL's clamps (docs/spec/ipc.md §5, §9), implemented independently of flcopilot.
+CRITICAL_HULL_FLOOR = 0.25
+RELEASE_RESERVE_WHEN = ("never", "capital_hostile_present", "target_is_capital")
+SIDECAR_CONTROL = ("welcome", "bye", "ping", "pong")
 
 
 class ExpectationFailed(AssertionError):
@@ -128,7 +142,7 @@ class FakeGame:
     """The DLL side of protocol v1, for tests."""
 
     def __init__(self, port: int = DEFAULT_PORT, host: str = HOST, auto_pong: bool = True,
-                 verbose: bool = False, name: str = "fakegame"):
+                 verbose: bool = False, name: str = "fakegame", strict: bool = True, max_stock: int = 99):
         if host != HOST:
             raise ValueError("fakegame only talks to 127.0.0.1")
         self.host = host
@@ -144,12 +158,20 @@ class FakeGame:
         self.pings: list[dict] = []
         self.last_command: dict | None = None
         self.connections = 0
+        self.sent: list[dict] = []
+        #: strict = every sidecar message is checked against the envelope rules (seq, no gt, ids, size).
+        self.strict = strict
+        self.violations: list[str] = []
+        self.peer_seq = 0
+        self.max_stock = max_stock
+        self.policy = {"player": dict(DEFAULT_POLICY), "carrier": dict(DEFAULT_POLICY)}
 
     # ---- connection --------------------------------------------------------------------
     async def connect(self, timeout: float = 2.0) -> None:
         self.reader, self.writer = await asyncio.wait_for(
             asyncio.open_connection(self.host, self.port, limit=1 << 20), timeout)
         self.seq = 0
+        self.peer_seq = 0
         self.connections += 1
         self._log(f"connected to {self.host}:{self.port}")
 
@@ -179,6 +201,7 @@ class FakeGame:
             self.seq += 1
             msg = {"v": PROTOCOL_VERSION, "seq": self.seq, "gt": self.gt(), **msg}
         await self.send_raw(json.dumps(msg, separators=(",", ":")).encode("utf-8") + b"\n")
+        self.sent.append(msg)
         self._log(f"-> {msg}")
         return msg
 
@@ -207,6 +230,8 @@ class FakeGame:
         cmd = cmd or self.last_command
         if cmd is None:
             raise ExpectationFailed("ack: no command received yet")
+        if ok and applied is _ABSENT and cmd.get("t") == "policy.set":
+            ok, applied, err = self.apply_policy(cmd)  # like the DLL: clamp, keep, echo the full policy
         fields: dict = {"id": cmd["id"], "ok": bool(ok)}
         if ok:
             fields["applied"] = ({k: v for k, v in cmd.items() if k not in ("v", "t", "seq", "id", "gt")}
@@ -216,6 +241,67 @@ class FakeGame:
         if detail:
             fields["detail"] = detail
         return await self.send("ack", **fields)
+
+    def apply_policy(self, cmd: dict) -> tuple:
+        """Apply a policy.set the way the DLL must (ipc.md §5, §9). Returns (ok, applied, err)."""
+        scope = cmd.get("scope")
+        if scope not in self.policy:
+            return False, None, "bad_value"
+        allowed = set(DEFAULT_POLICY) | {"v", "t", "seq", "id", "gt", "scope", "carrier"}
+        if any(k not in allowed for k in cmd):
+            return False, None, "unknown_field"
+        if "carrier" in cmd and scope != "carrier":
+            return False, None, "bad_value"
+        new = dict(self.policy[scope])
+        for k in DEFAULT_POLICY:
+            if k not in cmd:
+                continue
+            v = cmd[k]
+            if k in ("auto_bots", "auto_batts"):
+                if not isinstance(v, bool):
+                    return False, None, "bad_value"
+            elif k == "release_reserve_when":
+                if v not in RELEASE_RESERVE_WHEN:
+                    return False, None, "bad_value"
+            elif k in ("bots_reserve", "batts_reserve"):
+                if not isinstance(v, int) or isinstance(v, bool):
+                    return False, None, "bad_value"
+                v = max(0, min(self.max_stock, v))
+            else:  # *_below and critical_hull
+                if not _is_num(v):
+                    return False, None, "bad_value"
+                lo = CRITICAL_HULL_FLOOR if k == "critical_hull" else 0.05
+                v = max(lo, min(0.95, float(v)))
+            new[k] = v
+        self.policy[scope] = new
+        return True, dict(new), None
+
+    def _check_envelope(self, msg, nbytes: int) -> None:
+        problems = []
+        if nbytes > MAX_LINE_BYTES:
+            problems.append(f"line of {nbytes} bytes exceeds {MAX_LINE_BYTES}")
+        if not isinstance(msg, dict):
+            problems.append("not a JSON object")
+        else:
+            if msg.get("v") != PROTOCOL_VERSION or isinstance(msg.get("v"), bool):
+                problems.append(f"v={msg.get('v')!r}")
+            t = msg.get("t")
+            if not isinstance(t, str) or not t:
+                problems.append("missing t")
+            seq = msg.get("seq")
+            if seq != self.peer_seq + 1 or isinstance(seq, bool):
+                problems.append(f"seq {seq!r}, expected {self.peer_seq + 1}")
+            if isinstance(seq, int) and not isinstance(seq, bool):
+                self.peer_seq = seq
+            if "gt" in msg:
+                problems.append("sidecar sent gt (only the DLL does)")
+            if isinstance(t, str) and t not in SIDECAR_CONTROL and not isinstance(msg.get("id"), str):
+                problems.append(f"{t} without a command id")
+        if problems:
+            text = f"protocol violation in {str(msg)[:200]}: " + "; ".join(problems)
+            self.violations.append(text)
+            if self.strict:
+                raise ExpectationFailed(text)
 
     # ---- receiving ---------------------------------------------------------------------
     async def recv(self, timeout: float = 2.0, include_pings: bool = False) -> dict | None:
@@ -232,6 +318,7 @@ class FakeGame:
                 return None
             msg = json.loads(line.decode("utf-8"))
             self.received.append(msg)
+            self._check_envelope(msg, len(line))
             self._log(f"<- {msg}")
             if msg.get("t") == "ping":
                 self.pings.append(msg)
@@ -309,6 +396,44 @@ def load_script(path: str | os.PathLike) -> list[dict]:
     return steps
 
 
+DIRECTIVES = {
+    "send": {"raw"}, "send_raw": {"repeat", "newline"}, "hello": set(), "expect": {"timeout", "skip"},
+    "expect_closed": {"timeout"}, "expect_silence": set(), "ack": set(), "ptt": {"hold_ms"}, "sleep": set(),
+    "auto_pong": set(), "disconnect": set(), "connect": {"hello"},
+}
+BOOL_KEYS = ("raw", "skip", "newline", "auto_pong", "disconnect", "expect_closed", "connect")
+
+
+def check_step(step: dict) -> str | None:
+    """The directive of a step (None for a pure comment), after rejecting typos, extra keys and
+    non-boolean flags, so a mistyped script fails instead of passing vacuously."""
+    keys = {k for k in step if k not in ("_line", "comment")}
+    if not keys:
+        if "comment" in step:
+            return None
+        raise ValueError("empty step")
+    if "connect" in keys:
+        primary = "connect"
+    else:
+        found = [k for k in keys if k in DIRECTIVES]
+        if not found:
+            raise ValueError(f"unknown directive {sorted(keys)}")
+        if len(found) > 1:
+            raise ValueError(f"several directives in one step: {sorted(found)}")
+        primary = found[0]
+    extra = keys - {primary} - DIRECTIVES[primary]
+    if extra:
+        raise ValueError(f"unknown key(s) {sorted(extra)} for directive {primary!r}")
+    for flag in BOOL_KEYS:
+        if flag in step and not isinstance(step[flag], bool):
+            raise ValueError(f"{flag!r} must be true or false, got {step[flag]!r}")
+    if primary == "connect" and "hello" in step and not isinstance(step["hello"], bool):
+        raise ValueError("'hello' in a connect step must be true or false")
+    if primary in ("disconnect", "expect_closed", "connect") and step[primary] is not True:
+        raise ValueError(f"{primary!r} must be true")
+    return primary
+
+
 async def run_steps(game: FakeGame, steps: list[dict], default_timeout: float = 2.0) -> None:
     options = {}
     if steps and "options" in steps[0]:
@@ -322,27 +447,36 @@ async def run_steps(game: FakeGame, steps: list[dict], default_timeout: float = 
         where = f"line {step.get('_line', '?')}"
         timeout = float(step.get("timeout", default_timeout))
         try:
-            if "comment" in step and len([k for k in step if k != "_line"]) == 1:
-                continue
-            if "send" in step:
-                await game.send(step["send"], raw=bool(step.get("raw")))
-            elif "send_raw" in step:
+            kind = check_step(step)
+        except ValueError as exc:
+            raise ValueError(f"{where}: {exc}") from None
+        if kind is None:
+            continue
+        try:
+            if kind == "connect":
+                await game.close()
+                await game.connect()
+                if step.get("hello", True):
+                    await game.hello()
+            elif kind == "send":
+                await game.send(step["send"], raw=step.get("raw", False))
+            elif kind == "send_raw":
                 data = str(step["send_raw"]) * int(step.get("repeat", 1))
                 payload = data.encode("utf-8") + (b"\n" if step.get("newline", True) else b"")
                 await game.send_raw(payload)
-            elif "hello" in step and "connect" not in step:
+            elif kind == "hello":
                 await game.hello(**(step["hello"] or {}))
-            elif "expect" in step:
-                await game.expect(step["expect"], timeout=timeout, skip=bool(step.get("skip")))
-            elif "expect_closed" in step:
+            elif kind == "expect":
+                await game.expect(step["expect"], timeout=timeout, skip=step.get("skip", False))
+            elif kind == "expect_closed":
                 await game.expect_closed(timeout=timeout)
-            elif "expect_silence" in step:
+            elif kind == "expect_silence":
                 await game.expect_silence(float(step["expect_silence"]))
-            elif "ack" in step:
+            elif kind == "ack":
                 a = step["ack"] or {}
                 await game.ack(ok=a.get("ok", True), applied=a.get("applied", _ABSENT),
                                err=a.get("err"), detail=a.get("detail"))
-            elif "ptt" in step:
+            elif kind == "ptt":
                 mode = step["ptt"]
                 if mode == "tap":
                     await game.ptt(True)
@@ -352,17 +486,12 @@ async def run_steps(game: FakeGame, steps: list[dict], default_timeout: float = 
                     await game.ptt(mode == "down")
                 else:
                     raise ValueError(f"ptt must be down|up|tap, got {mode!r}")
-            elif "sleep" in step:
+            elif kind == "sleep":
                 await asyncio.sleep(float(step["sleep"]))
-            elif "auto_pong" in step:
+            elif kind == "auto_pong":
                 game.auto_pong = bool(step["auto_pong"])
-            elif "disconnect" in step:
+            elif kind == "disconnect":
                 await game.close()
-            elif "connect" in step:
-                await game.close()
-                await game.connect()
-                if step.get("hello", True):
-                    await game.hello()
             else:
                 raise ValueError(f"unknown directive {sorted(k for k in step if k != '_line')}")
         except ExpectationFailed as exc:
