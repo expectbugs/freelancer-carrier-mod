@@ -1,3 +1,4 @@
 # Notifications (fallback log when PushNotification is unavailable or not sent)
 
 - 2026-10-17T23:08-05:00 — Freelancer carrier build started — Phase 0 (5 foundation agents spawning). [PushNotification: not sent, terminal active]
+- 2026-10-18T00:42-05:00 — **BLOCKER (needs Adam):** GPU fault at 00:28:03 — kernel `Xid 51 BAD_TSG` from gamescope's Xwayland, then `Xid 154` recovery action "PF FLR" (reset required). Since then every new Vulkan device fails (`vkCreateDevice ERROR_INITIALIZATION_FAILED`), so DXVK/HDE rendering cannot start. OpenGL still renders. **Fix: reboot, or `nvidia-smi -r` with X stopped** — not done by the build (it would kill your desktop session; Frigate's CUDA ffmpeg/detector also use this GPU and new CUDA contexts may fail). Build continues: host work + lanes on Wine's OpenGL renderer; DXVK-specific checks re-run after the reset. gamescope is banned for the build. [PushNotification: not sent, terminal active]

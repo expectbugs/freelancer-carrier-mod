@@ -6,7 +6,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Current phase:** Phase 0 — foundation packages running
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
-- **Lanes:** not yet created (P0-HARNESS)
+- **Lanes:** created by P0-HARNESS (lane-1,2,6,7,8 exist). **GPU: Vulkan dead since 2026-10-18 00:28 (Xid 51→154; D103) — needs Adam reboot/GPU reset; lanes use wined3d fallback; re-run DXVK items after reset.**
 - **Last update:** 2026-10-18T00:27 (P0: REPO+TOOLCHAIN fixing, DATATOOLS+SIDECAR in review, HARNESS running)
 
 ## Next actions
