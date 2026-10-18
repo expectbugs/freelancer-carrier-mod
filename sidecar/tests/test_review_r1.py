@@ -31,6 +31,8 @@ from flcopilot.profiles import ProfileError, check_port
 
 RUN_SH = SIDECAR_DIR / "run.sh"
 FAKEGAME = SIDECAR_DIR / "tools" / "fakegame.py"
+#: server.stop() warnings that mean a stuck peer delayed the shutdown.
+STUCK_WARNINGS = ("session did not finish in time", "listener did not close in time")
 
 
 async def until(pred, timeout: float = 2.0, what: str = "condition") -> None:
@@ -208,6 +210,7 @@ def test_ptt_cancel_discards_the_utterance_for_every_reason(fakegame):
             await g.connect()
             await g.handshake()
             await until(lambda: "open" in mic.events, what="mic open")
+            assert mic.events == ["reset", "open"]  # no recording state survives into a new session
             for reason in protocol.PTT_CANCEL_REASONS:
                 await g.ptt(True)
                 await g.ptt(False, reason=reason)
@@ -261,15 +264,16 @@ def test_send_timeout_aborts_a_peer_that_never_reads(monkeypatch):
                 with patch.object(server_mod.log, "warning", wraps=server_mod.log.warning) as warn:
                     await app.server.stop("shutdown")
                 assert time.monotonic() - t0 < 1.0
-                assert not any("did not" in str(c.args[0]) for c in warn.call_args_list)
+                assert not any(str(c.args[0]) in STUCK_WARNINGS for c in warn.call_args_list)
             finally:
                 s.close()
     run(body())
 
 
-def test_close_aborts_when_the_flush_never_finishes(monkeypatch):
-    """bye goes into the write buffer (drain does not block), but the peer never reads: close() must
-    not wait for the flush forever."""
+@pytest.mark.parametrize("via", ["session.close", "server.stop"])
+def test_close_aborts_when_the_flush_never_finishes(monkeypatch, via):
+    """bye goes into the write buffer (drain does not block), but the peer never reads: neither
+    close() nor the server's stop() may wait for the flush forever."""
     monkeypatch.setattr(server_mod, "CLOSE_FLUSH_S", 0.3)
 
     async def body():
@@ -285,7 +289,14 @@ def test_close_aborts_when_the_flush_never_finishes(monkeypatch):
                     await sess.send_command("say", speaker="copilot", text="y" * 500)
                 assert tr.get_write_buffer_size() > 0  # the kernel buffers are full
                 t0 = time.monotonic()
-                await sess.close("shutdown", detail="test")
+                if via == "server.stop":
+                    with patch.object(server_mod.log, "warning", wraps=server_mod.log.warning) as warn:
+                        await app.server.stop("shutdown")
+                    texts = [str(c.args[0]) for c in warn.call_args_list]
+                    assert "close did not flush in time; aborting" in texts
+                    assert not any(t in STUCK_WARNINGS for t in texts)
+                else:
+                    await sess.close("shutdown", detail="test")
                 await asyncio.wait_for(sess.done.wait(), 3.0)
                 assert 0.25 <= time.monotonic() - t0 < 2.5
                 assert established_on(port) == []
