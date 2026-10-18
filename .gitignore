@@ -1,9 +1,16 @@
 # Personal / research / reference material — never public
 /local/
 # Build outputs and fetched vendor trees
-/build/
-/out/
+build/
+out/
 /vendor/
+# Built/derived binaries are never committed (CLAUDE.md guardrail 5)
+*.dll
+*.exe
+*.lib
+*.exp
+*.dmp
+*.mdmp
 *.obj
 *.pdb
 *.ilk
