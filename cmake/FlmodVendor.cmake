@@ -147,7 +147,11 @@ target_compile_definitions(flmod_fluf INTERFACE
   _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING WINVER=0x0A00 _WIN32_WINNT=0x0A00
   FLUF_SDK YAML_CPP_STATIC_DEFINE
   IMGUI_DEFINE_MATH_OPERATORS IMGUI_ENABLE_FREETYPE IMGUI_USE_STB_SPRINTF IMGUI_USE_WCHAR32
-  "IMGUI_API=__declspec(dllimport)" "IMPLOT_API=__declspec(dllimport)" "STBIDEF=__declspec(dllimport)")
+  "IMGUI_API=__declspec(dllimport)" "IMPLOT_API=__declspec(dllimport)" "STBIDEF=__declspec(dllimport)"
+  # Not in R1's list but required: FLUF's Utils/Random.hpp includes stduuid's <uuid.h>, which falls back
+  # to <gsl/span> (absent from the dev package) unless this is set. FLUF itself gets it from the conan
+  # stduuid target in C++20+ mode, so it selects std::span exactly like FLUF.dll's build.
+  LIBUUID_CPP20_OR_GREATER)
 target_include_directories(flmod_fluf SYSTEM INTERFACE
   "${_fd}/include"
   "${_fd}/include/FLUF"
