@@ -27,7 +27,10 @@ date -Is > "$R/local/heartbeat"
 # Environment every Bash call in the session inherits (CONVENTIONS §15): wine guards first on PATH, sentinel prefix, env file
 ENVX="export CLAUDE_ENV_FILE=$R/tools/env.sh PATH=$R/tools/bin:/usr/lib/llvm/22/bin:\$PATH WINEPREFIX=/home/user/freelancer/prefix-UNSET DISPLAY=\${DISPLAY:-:0}"
 tmux new-session -d -s "$S" -c "$R" -x 220 -y 60
-tmux send-keys -t "$S" "$ENVX; cd $R && $CLAUDE $(cat "$R/local/claude_flags") \"\$(cat tools/KICKOFF_PROMPT.txt)\"" Enter
+# A build already under way (IN_PROGRESS, or reset from STOPPED/HALTED above) resumes; only a fresh ledger kicks off
+PROMPT=tools/KICKOFF_PROMPT.txt
+case "$first" in *IN_PROGRESS*|*STOPPED*|*HALTED*) PROMPT=tools/RESUME_PROMPT.txt ;; esac
+tmux send-keys -t "$S" "$ENVX; cd $R && $CLAUDE $(cat "$R/local/claude_flags") \"\$(cat $PROMPT)\"" Enter
 echo "$ENVX" > "$R/local/session_env"
 tmux has-session -t "$W" 2>/dev/null || tmux new-session -d -s "$W" -c "$R" "$R/tools/watchdog.sh"
 echo "Started. Watch:      tmux attach -t $S        (detach: Ctrl-b d)"
