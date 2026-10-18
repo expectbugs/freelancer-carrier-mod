@@ -279,44 +279,74 @@ wrong rc column (script bug, see its `README.txt`); use the rerun.
   inside the catch funclet), deploy all nine DLLs from `$FLMOD_VENDOR/msvc-redist/x86/` into the lane's EXE dir at
   deploy time (never into the play install, never committed). The prefix registry does the rest (E1); re-run the
   probe with `--crt native`. Copy the whole set so `msvcp140_atomic_wait`/`_1`/`_2` match the native `msvcp140`.
-- Whatever is decided, the harness deploy step should assert that no stray `msvcp140*`/`vcruntime140*` DLL sits in the
-  EXE dir unless it was put there on purpose (E1 shows such a file silently changes the runtime).
+- Whatever is decided, the harness deploy step should assert that no stray MSVC runtime DLL sits in the EXE dir
+  unless it was put there on purpose (E1 shows such a file silently changes the runtime). The registry sets
+  `native,builtin` for more than the 140 set (review r2 note: also `ucrtbase`, `vcruntime140_1`, `concrt140`, the
+  `api-ms-win-crt-*` sets and `msvcp1?0`/`msvcr1?0`), so the check should cover `msvcp1*`, `msvcr1*`,
+  `vcruntime140*`, `concrt140*`, `ucrtbase*` and `api-ms-win-crt-*` (ABI.md §6.6).
+- Still open (UNVERIFIED, for P0-TRACK-A): the source scan in point 7 does not see library code inlined into FLUF.dll;
+  a binary scan of FLUF's catch funclets for `_CxxThrowException`/rethrow calls would settle it. FLUF's own non-CRT
+  imports (`d3dcompiler_47`, `opengl32`, `imm32`, `bcrypt`, `crypt32`, …) are not covered by check_imports (it
+  checks our binaries); confirm they resolve in the lane prefix.
 
-## RESUME POINT (2026-10-18, review r1 fix round 1: COMPLETE)
+## Review r2 fixes (2026-10-18)
 
-Branch `wp/P0-TOOLCHAIN`. Reviews: `state/reports/P0-TOOLCHAIN-r1.md`. All r1 findings are done; nothing is pending.
-If a later round reopens this package, start from the review's new findings.
+Review: `state/reports/P0-TOOLCHAIN-r2.md` (reviewer evidence `$FLMOD_TESTRUNS/20261018T065307Z-review-P0-TOOLCHAIN-r2/`).
 
-### Review r1 findings
+- **F1 (MAJOR) lint vs doctest files under `src/logic/**/tests/`.** Cause VERIFIED by the reviewer (R/11b, R/11e)
+  and by my negative control: the r1 allowlist lint scanned tests/ dirs, and its stamp DEPENDS used a different file
+  set (sources without tests/, headers with tests/), so fresh and incremental builds disagreed. No hypothesis list:
+  the cause was shown directly, not inferred. Decision: exclude `(^|/)tests/` from the lint and the header check
+  rather than allow `<doctest/...>` under tests/, because tests/ code is host-only (never in `logic` or a win32
+  binary), also needs quoted helpers from `tests/host/`, and the host compile already rejects Windows headers there.
+  One function (`cmake/LogicLintFiles.cmake`) now defines the set for the lint script, the stamp's DEPENDS and the
+  header check. Fixture ctest `logic_tests_dir_doctest` (`tests/host/LogicTestsDirFixture.cmake`) PASS (6.5 s);
+  negative control with the exclusion commented out: FAIL "Forbidden includes … zz_fixture/tests/…"
+  (`$FLMOD_TESTRUNS/20261018T0730Z-toolchain-r2-f1/negative_control_no_tests_exclusion.log`).
+- **F2** `toolchain/check_flags.py` in stage 10 (pytest 11 cases); negative: a spike TU with
+  `-mno-stackrealign /EHsc` makes stage 10 FAIL `win32-trackB:flags`, PASS after removal
+  (`$FLMOD_TESTRUNS/20261018T0750Z-toolchain-r2-ci/negatives.txt`). Who runs ehprobe: README + ABI.md §6.5 (proposal).
+- **F3/F5** 13 `hook` cases in the probe (the reviewer's 9 patterns + 4 hook-template paths); ABI.md §6.7 template,
+  §6.8 in-game items. 37 PASS / 3 KNOWN-BROKEN / 0 FAIL / 0 SKIP per runtime on both tracks.
+- **F4** `toolchain/ci_tracks.sh` shared by stages 10/50; FLMOD_TRACK=B ignores a stale trackA list (PASS), unset
+  checks it (FAIL, control), invalid value FAILs (`negatives.txt`).
+- **F6** + orchestrator `--from`: `toolchain/prefix_clone.sh`; 23 refused invocations give the right exit code and
+  create no run dir or clone (`$FLMOD_TESTRUNS/20261018T0745Z-toolchain-r2-f6/refusals.txt`); in-use detection test
+  (`prefix_in_use_test.txt`); `--crt both` without the redist ends `result=SKIP`, exit 77, and a prefix without the
+  game dir reports the engine case as SKIP (`skip_paths/`).
+- **F7** README "The src/game rule" (module glob must exclude `(^|/)(tests|scenarios)/`).
+
+## RESUME POINT (2026-10-18, review r2 fix round 2: COMPLETE)
+
+Branch `wp/P0-TOOLCHAIN`. Reviews: `state/reports/P0-TOOLCHAIN-r1.md` (all findings DONE; the per-finding table is in
+this file at commit `0bceb22`) and `state/reports/P0-TOOLCHAIN-r2.md` (all findings DONE, "Review r2 fixes" above).
+Nothing is pending. If a later round reopens the package, start from that review's findings.
+
+### Review r2 findings
 
 | Finding | State / evidence |
 |---|---|
-| MAJOR EH: fix the /EHa comments | DONE (`clang-cl-i686.cmake`, `-overrides.cmake`) |
-| MAJOR EH: (a)-(c) in ABI.md + verified (a) workaround | DONE (ABI.md §6.1-6.6, copy-paste `flmod_seh_guard`) |
-| MAJOR EH: regression probe | DONE (`src/module/ehprobe`, `toolchain/ehprobe.sh`, `ehprobe_cases.tsv`; `load_proof.sh` runs it). Final runs on 2026-10-18: B `20261018T064132Z-toolchain-loadproof/` (LOAD PASS + EH both CRTs 24/3/0), A `20261018T064149Z-ehprobe/` (both CRTs 24/3/0). Negative control without `-mstackrealign`: `20261018T054555Z-ehprobe/` and Question 3 E3 |
-| MAJOR EH: ten hypotheses for (b),(c), experiments | DONE (Bug 2 above) |
-| MAJOR EH: toolchain-level fix | DONE for (c): `/clang:-mstackrealign` (every C/C++ TU of both builds, `20261018T064024Z-toolchain-acceptance-r1/12-flags-tu.txt`). (a), (b) stay rules |
-| MAJOR EH: engine facts for TRACK-A/B | DONE (final report) |
-| MINOR check_imports delay imports nested | DONE |
-| MINOR any missing msvcp140*/vcruntime140* DLL = FAIL | DONE |
-| MINOR WILL_FAIL negative probes accept any failure | DONE (`tests/host/ExpectFailure.cmake`) |
-| MINOR lint denylist too small | DONE (allowlist) |
-| MINOR /tests/ absolute-path filters, nested tests dirs | DONE |
-| MINOR src/game not discovered: document for ARCH-0 | DONE (root CMakeLists comment + README "Adding a target") |
-| MINOR fetch_vendor --verify downloads / checks stamps only | DONE |
-| MINOR PINS FLUF upstream URLs | DONE (PINS.md; HTTP 200 + matching content-length, 2026-10-18) |
-| MINOR load_proof hard-coded clone | DONE (`--clone`) |
-| MINOR ci.d protocol drift | DONE. Stages 10/20/50 run by P0-REPO's real `harness/ci.sh` (wp/P0-REPO @ 4e02754) with `--full --only build,host-tests,import-check` from an empty `build/`: PASS/PASS/PASS (`20261018T063859Z-ci/`). Stale-binary test: a FAILing DLL copied into `build/win32-trackB/out/` is ignored by stage 50 (`20261018T063947Z-ci/`, PASS; the same file checked directly FAILs, `stale_control.txt`), then deleted |
-| MINOR 14.5x STL claim overstated | DONE |
-| MINOR FLSDK code embedded in binaries (W5-SHIP) | DONE (ABI.md §7, PINS.md cross-reference) |
+| F1 MAJOR lint rejects doctest files under src/logic/**/tests/ | DONE: `cmake/LogicLintFiles.cmake`; ctest `logic_tests_dir_doctest` PASS (host + host-asan); negative control FAIL (`20261018T0730Z-toolchain-r2-f1/`) |
+| F2 static flag assertion; who runs ehprobe | DONE: `toolchain/check_flags.py` in stage 10; negative in `20261018T0750Z-toolchain-r2-ci/negatives.txt`; README + ABI.md §6.5 |
+| F3 reviewer's hostable EH cases | DONE: 9 `hook_*` cases; not-hostable items in ABI.md §6.8 |
+| F4 stage 50 track selection | DONE: `toolchain/ci_tracks.sh`; `negatives.txt` N1a-c |
+| F5 hook template | DONE: ABI.md §6.7, compiled and run as `hook_template_*` (4 cases) |
+| F6 ehprobe --prefix, exit 77, validation order | DONE: `20261018T0745Z-toolchain-r2-f6/` |
+| F7 src/game tests rule | DONE: README "The src/game rule", root CMakeLists comment |
+| Orchestrator: load_proof/ehprobe `--from` (default a dev baseline) | DONE: default `prefix-dev-base-B`; the play prefix only with `--from play` |
 
-Full acceptance set from an empty `build/`: `$FLMOD_TESTRUNS/20261018T064024Z-toolchain-acceptance-r1/` (13 steps,
-all rc 0: host + host-asan ctest 5/5, both win32 builds, PE32 i386 headers, hello_a exports, check_imports both
-tracks, pytest 16/16, fetch_vendor/setup_xwin `--verify`, flags per TU, manual windows.h negative test).
+### Final acceptance (fix round 2)
+
+- From an empty `build/`: P0-REPO's real `ci.sh` (wp/P0-REPO @ 32ab66a) `--full --only public,build,host-tests,import-check`:
+  PASS / PASS / PASS / PASS (`$FLMOD_TESTRUNS/20261018T072821Z-ci/`), plus the remaining acceptance items
+  (`20261018T072821Z-toolchain-acceptance-r2/`, 11 steps rc 0: PE32 i386 headers, hello_a exports, check_imports
+  both tracks, pytest 27/27, both `--verify`, check_flags, manual windows.h negative test, ctest 6/6).
+- Wine (no D3D device; GPU Recovery Action None before and after): load proof B from `prefix-dev-base-B`
+  `20261018T072930Z-toolchain-loadproof/` (LOAD PASS, EH both CRTs 37/3/0/0); EH probe A `20261018T072950Z-ehprobe/`
+  (both CRTs 37/3/0/0).
 
 ### Things outside the repo
 
-- `$FLMOD_VENDOR`, `$XWIN_ROOT`, `/home/user/opt/xwin-cache-18`: unchanged this session (`--verify` PASS).
-- Wine prefixes: every `prefix-dev-toolchain*` clone of this session was deleted by its script; none left.
-  `prefix-dev-base-A/B` belong to P0-HARNESS. No wine processes of mine are running. GPU "Recovery Action: None"
-  before and after every Wine run (no D3D device is created by these tools).
+- `$FLMOD_VENDOR`, `$XWIN_ROOT`, `/home/user/opt/xwin-cache-18`: unchanged (`--verify` PASS).
+- Wine prefixes: every `prefix-dev-toolchain*` clone of this session was deleted; none left. The dev baselines were
+  only read (reflink source). No wine processes of mine are running.
