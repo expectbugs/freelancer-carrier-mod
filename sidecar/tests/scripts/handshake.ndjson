@@ -1,0 +1,6 @@
+// Handshake only. The fake client sends hello on connect; the sidecar must answer welcome
+// (seq 1), answer a ping with a pong carrying the same n, and accept a clean disconnect.
+{"expect": {"t": "welcome", "v": 1, "seq": 1, "sidecar": "$str", "features": "$list", "heartbeat_ms": "$int"}}
+{"send": {"t": "ping", "n": 7}}
+{"expect": {"t": "pong", "v": 1, "n": 7}}
+{"disconnect": true}

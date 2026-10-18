@@ -1,0 +1,14 @@
+// Policy round trip (test profile). A snapshot reports 7 nanobots; a push-to-talk down/up makes
+// the sidecar's fake pipeline send a canned policy.set reserving them for a capital ship, then
+// a say line. The fake client acks both (the first ack echoes a full applied policy).
+{"expect": {"t": "welcome", "profile": "test"}}
+{"send": {"t": "state", "rate": "calm", "ship": {"hull": 0.9, "shield": 1.0, "shield_up": true, "bots": 7, "batts": 3, "mode": "free", "system": "test_system"}, "target": null, "threat": {"hostiles": 0, "capital_hostile": false}, "ui": {"paused": false, "focused": true}}}
+{"ptt": "down"}
+{"sleep": 0.05}
+{"ptt": "up"}
+{"expect": {"t": "policy.set", "id": {"$re": "c-[0-9]+"}, "scope": "player", "bots_reserve": 7, "release_reserve_when": "capital_hostile_present", "auto_bots": "$absent"}, "timeout": 3}
+{"ack": {"ok": true, "applied": {"scope": "player", "auto_bots": true, "bots_hull_below": 0.5, "bots_reserve": 7, "critical_hull": 0.25, "release_reserve_when": "capital_hostile_present", "auto_batts": true, "batts_shield_below": 0.25, "batts_reserve": 0}}}
+{"expect": {"t": "say", "id": {"$re": "c-[0-9]+"}, "speaker": "copilot", "text": {"$contains": "nanobots"}, "subtitle": true}}
+{"ack": {"ok": true, "applied": {"shown": true}}}
+{"expect_silence": 0.3}
+{"disconnect": true}
