@@ -1,0 +1,16 @@
+// Push-to-talk cancel (ipc.md §4.7): the DLL stopped polling while the key was held (here: the
+// window lost focus), so it sends ptt{down:false, reason}. The sidecar discards that utterance
+// and sends nothing; the next normal press is handled as usual.
+{"expect": {"t": "welcome", "profile": "test"}}
+{"send": {"t": "state", "rate": "calm"}}
+{"ptt": "down"}
+{"sleep": 0.05}
+{"ptt": "cancel", "reason": "focus_lost"}
+{"expect_silence": 0.5}
+{"ptt": "tap", "hold_ms": 50}
+{"expect": {"t": "policy.set", "scope": "player"}, "timeout": 3}
+{"ack": {"ok": true}}
+{"expect": {"t": "say", "speaker": "copilot"}}
+{"ack": {"ok": true, "applied": {"shown": true}}}
+{"expect_silence": 0.2}
+{"disconnect": true}

@@ -1,0 +1,14 @@
+// Disconnect and reconnect (game restart). The second connection gets a fresh welcome
+// (its own seq starts at 1 again) and a working heartbeat.
+{"expect": {"t": "welcome", "seq": 1}}
+{"send": {"t": "state", "rate": "calm"}}
+{"send": {"t": "ping", "n": 1}}
+{"expect": {"t": "pong", "n": 1}}
+{"disconnect": true}
+{"sleep": 0.1}
+{"connect": true}
+{"expect": {"t": "welcome", "seq": 1}}
+{"send": {"t": "state", "rate": "calm"}}
+{"send": {"t": "ping", "n": 2}}
+{"expect": {"t": "pong", "n": 2}}
+{"disconnect": true}

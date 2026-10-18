@@ -1,0 +1,5 @@
+{"options": {"hello": false}}
+// A v2 DLL: the sidecar answers bye{reason:"version"} listing what it supports, then closes.
+{"hello": {"v": 2}}
+{"expect": {"t": "bye", "reason": "version", "supported": [1]}}
+{"expect_closed": true}

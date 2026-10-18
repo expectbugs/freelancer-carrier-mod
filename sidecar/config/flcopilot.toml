@@ -1,0 +1,54 @@
+# flcopilot public defaults. Committed: no secrets and no device names here.
+#
+# Overlaid at runtime, in this order (later wins):
+#   1. the gitignored local overlay $FLMOD_LOCAL/sidecar.local.yaml (flat keys mic_match and
+#      ptt_key, or the same [section] keys below as YAML mappings)
+#   2. env FLCOPILOT_PORT (the harness sets 29170 + N for lane N)
+#   3. CLI flags
+# "${VAR}" expands from the environment; a value with an unset variable counts as unset.
+
+[server]
+# Always bound on 127.0.0.1 (not configurable). The play install uses 29170.
+port = 29170
+heartbeat_s = 2.0          # ping interval, both directions
+missed_pongs = 3           # unanswered pings before the session is closed
+handshake_timeout_s = 5.0  # a connection must send hello within this
+ack_timeout_s = 5.0        # a command without an ack by then counts as lost
+
+[log]
+# Structured JSON lines, rotated at max_bytes. Falls back to ~/.local/state/flcopilot/ when
+# FLMOD_LOCAL is unset (play install: pass --log-file).
+file = "${FLMOD_LOCAL}/sidecar-logs/sidecar.log"
+level = "INFO"
+max_bytes = 10485760
+backups = 5
+
+[profile]
+default = "live"           # live | test. Harness, lanes, soaks and CI always pass --profile test.
+
+[audio]
+mic_match = ""             # substring of the PipeWire capture source name. Set it in the local overlay only.
+ptt_key = "numpad_period"  # numpad_period (VK 110) | numpad_minus (VK 109) | vk:<code>. The DLL polls the key.
+capture_enabled = false    # P0 ships capture plumbing only; W1-SIDECAR enables it
+sample_rate = 16000
+preroll_ms = 300
+tail_ms = 150
+output_device = "default"  # the default PipeWire sink
+
+[stt]
+model_path = "${FLMOD_MODELS}/whisper/faster-whisper-large-v3-turbo"
+model_name = "large-v3-turbo"  # used only if model_path is missing; resolved from the HF cache, offline
+device = "cuda"
+compute_type = "float16"
+language = "en"
+beam_size = 1
+
+[tts]
+model_dir = "${FLMOD_MODELS}/kokoro"
+voice = "am_michael"
+speed = 1.0
+
+[test]
+# Test profile only: the fake transcriber's text and the fake brain's reserve when no snapshot is known.
+fake_transcript = "save nanobots for the cruiser"
+fake_bots_reserve = 5
