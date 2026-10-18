@@ -7,7 +7,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-1/2 disposable; lane-6/7/8 leftovers HARNESS may delete). **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T03:12 (TOOLCHAIN r3 review; REPO fix r2; SIDECAR+DATATOOLS r2 review; HARNESS running)
+- **Last update:** 2026-10-18T03:20 (SIDECAR r2 PASS → polish; TOOLCHAIN r3 review; REPO fix r2; DATATOOLS r2 review; HARNESS running)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
@@ -28,7 +28,7 @@ W4-ESC-* and FIX-* rows are appended when created.
 | P0-TOOLCHAIN | 0 | impl | — | REVIEW (r3) | 1 | wp/P0-TOOLCHAIN @ 370c47f | | fix r2 DONE (f2 report: lint excludes tests/, check_flags in stage 10, ehprobe 37/3/0 both tracks×CRTs, --from dev baseline); r3 = same reviewer resumed. For TRACK-A/B + W1-PLATFORM briefs: run `toolchain/ehprobe.sh --crt both` in acceptance; ABI.md §6.7 hook template, §6.8 in-game EH items; stray-DLL assertion must cover ucrtbase*/concrt140*/msvcp1?0*; binary-scan FLUF catch funclets; confirm FLUF non-CRT imports resolve in the lane prefix |
 | P0-HARNESS | 0 | impl | — | RUNNING (a1 continued) | 1 | wp/P0-HARNESS @ a5bafe5 | | report state/reports/P0-HARNESS-a1.md; RESUME POINT at top of harness/NOTES.md; first after reboot: Track A DXVK boot + dacom stricmp crash triage, concurrency, spew allow-lists, vdesk input gate |
 | P0-DATATOOLS | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-DATATOOLS @ 8eb78e3 | | fix r1 DONE + D107 addendum (120 tests); r2 reviewer running; squash-merge (D106: 463eb68/1a99d13 fail --commits); note for W1-DATA brief: REQ-9 CLI conflicts with fltools/CONVENTIONS |
-| P0-SIDECAR | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-SIDECAR @ 75da0e4 | | fix r1 DONE (f1 report): 306 tests x20 clean; CUDA voice_smoke PASS (stt 131 ms, tts first audio 374 ms); open proposal D7: lane.sh exports FLCOPILOT_FORCE_TEST_PROFILE=1; r2 reviewer running |
+| P0-SIDECAR | 0 | impl | — | REVIEW PASSED (r2) → polish | 1 | wp/P0-SIDECAR @ 75da0e4 | | r2 PASS (5 MINOR); polish round running while merge waits for P0-REPO (ipc.md gaps a–f, per-session PTT state, warn rate-limit, play-port test safety, doc); merge after P0-REPO. D7 (lane.sh exports FLCOPILOT_FORCE_TEST_PROFILE=1) accepted, already on wp/P0-HARNESS. Cross-package: ptt_vk INI write at deploy → W2-REFLEX (DLL) + W1-DATA (deploy) briefs. Brain sandbox items UNVERIFIED until W4-BRAIN first run (--setting-sources "", init field names, ~/.claude/CLAUDE.md with HOME) |
 | P0-TRACK-A | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | P0-TRACK-B | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | S-BASE | 0 | spike | G0a, P0-DATATOOLS | TODO | 0 | | | |
@@ -96,8 +96,8 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 | aa760a6d5172501fc | P0-HARNESS | impl (a1 cont.) | 2026-10-18T01:44 | from a5bafe5 |
 | aeb69a8aaddaa49db | P0-DATATOOLS | impl (fix r1 cont.) | 2026-10-18T01:44 | f1 + D107 DONE @ 8eb78e3 (idle) |
 | a1a1514f6667c4372 | P0-DATATOOLS | review r2 | 2026-10-18T02:47 | |
-| ae243e39aecae6681 | P0-SIDECAR | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE ~02:09 @ 75da0e4 (idle; resume via SendMessage for fix r2) |
-| a0a202af5ab1a8be0 | P0-SIDECAR | review r2 | 2026-10-18T02:10 | |
+| ae243e39aecae6681 | P0-SIDECAR | impl (polish) | 2026-10-18T01:44 | f1 DONE @ 75da0e4; resumed 03:20 for MINOR polish |
+| a0a202af5ab1a8be0 | P0-SIDECAR | review r2 | 2026-10-18T02:10 | DONE 03:15: PASS (state/reports/P0-SIDECAR-r2.md); resume to verify the polish |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
