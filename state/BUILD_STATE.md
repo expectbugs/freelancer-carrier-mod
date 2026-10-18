@@ -7,9 +7,11 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-6/7/8 deleted). Measured: `LANES=4` on DXVK (~195 fps each), `LANES_SW=2` on wined3d-sw; Track A must use vdesk mode. **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T10:02Z (HARNESS-b merged; TRACK-A/B running)
+- **Last update:** 2026-10-18T10:06Z (winding down per Adam; TRACK-A/B checkpointing)
 
 ## Next actions
+**WINDING DOWN (Adam, 2026-10-18 ~10:05Z):** pause the build at a clean checkpoint. TRACK-A/B told to checkpoint (finish the current step, no new long runs, release lanes, RESUME POINT at the top of spikes/track_{a,b}/NOTES.md, report PARTIAL). Then: save reports, remove clean worktrees, write resume briefs, set BUILD_STATUS: STOPPED (watchdog exits), display-awake stop, commit + push, notify.
+
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
 1. Wait for the 5 running agents (table below). Each turn: check `STOP`, heartbeat, `local/gpu-fault.log`.
 2. After each fix report: save it to `state/reports/<ID>-f1.md`, then spawn a round-2 reviewer (`state/briefs/<ID>-r2.md` from REVIEWER_BRIEF_TEMPLATE; include the r1 findings and the f1 report). P0-HARNESS: save its report as `state/reports/P0-HARNESS-a1b.md` (attempt 1 continued); it gets its first review (r1) once it reports DONE.
