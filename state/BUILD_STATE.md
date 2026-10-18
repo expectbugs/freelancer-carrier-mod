@@ -86,12 +86,14 @@ W4-ESC-* and FIX-* rows are appended when created.
 | F | PENDING | |
 
 ## Agents running
-Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 2026-10-18T01:44, Opus 5.5 xhigh, worktree isolation):
+Opus 5.5 xhigh, worktree isolation.
 
 | Agent name/id | Package | Role (impl/review) | Started | Notes |
 |---|---|---|---|---|
-| aa760a6d5172501fc | P0-HARNESS | impl (fix r1) | 2026-10-18T01:44 | f1 DONE ~09:10Z @ e05dfc9 (idle) |
-| ae9a5d0d12e392a5a | P0-HARNESS | review r1 → r2 | 2026-10-18T03:30 | r1 CHANGES_REQUIRED; resumed for r2 ~09:12Z |
+| abdf0fe9fe8b438d3 | P0-TRACK-A | impl (spike, attempt 1) | 2026-10-18T09:27Z | from main 9ed5b56; brief state/briefs/P0-TRACK-A.md |
+| abf9280af309b9ff8 | P0-TRACK-B | impl (spike, attempt 1) | 2026-10-18T09:27Z | from main 9ed5b56; brief state/briefs/P0-TRACK-B.md |
+| aa760a6d5172501fc | P0-HARNESS | impl (follow-up wp/P0-HARNESS-b, D113) | 2026-10-18T09:27Z | r2 MINORs + harness/tests in stage 30; at most 1 lane |
+| ae9a5d0d12e392a5a | P0-HARNESS | review (idle) | — | resume to review wp/P0-HARNESS-b |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
