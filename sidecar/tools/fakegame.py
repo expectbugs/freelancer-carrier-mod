@@ -31,6 +31,10 @@ are ignored. Directives:
                                               (or ok:false with unknown_field/bad_value), as a
                                               real DLL would; otherwise an echo of the fields
     {"ptt": "down" | "up"}  or  {"ptt": "tap", "hold_ms": 200}
+    {"ptt": "cancel", "reason": "focus_lost"} release sent because polling stopped with the key held
+                                              (ipc.md §4.7): ptt{down:false, reason}. reason is one
+                                              of focus_lost|pause|menu|chat|disconnect (default
+                                              focus_lost); only "cancel" takes a reason
     {"sleep": 0.1}
     {"auto_pong": false}                      stop answering the sidecar's pings
     {"disconnect": true}
@@ -71,6 +75,7 @@ DEFAULT_POLICY = {
 }
 # The fake DLL's clamps (docs/spec/ipc.md §5, §9), implemented independently of flcopilot.
 CRITICAL_HULL_FLOOR = 0.25
+PTT_CANCEL_REASONS = ("focus_lost", "pause", "menu", "chat", "disconnect")
 RELEASE_RESERVE_WHEN = ("never", "capital_hostile_present", "target_is_capital")
 SIDECAR_CONTROL = ("welcome", "bye", "ping", "pong")
 
@@ -224,8 +229,14 @@ class FakeGame:
         await self.hello(**overrides)
         return await self.expect({"t": "welcome", "v": PROTOCOL_VERSION}, timeout=timeout)
 
-    async def ptt(self, down: bool) -> dict:
-        return await self.send("ptt", down=bool(down))
+    async def ptt(self, down: bool, reason: str | None = None) -> dict:
+        """A push-to-talk edge. ``reason`` (only with down=False) makes it a cancel: the DLL stopped
+        polling while the key was held (ipc.md §4.7)."""
+        if reason is None:
+            return await self.send("ptt", down=bool(down))
+        if down or reason not in PTT_CANCEL_REASONS:
+            raise ValueError(f"a ptt reason needs down=false and one of {PTT_CANCEL_REASONS}, got {reason!r}")
+        return await self.send("ptt", down=False, reason=reason)
 
     async def ack(self, cmd: dict | None = None, ok: bool = True, applied=_ABSENT, err: str | None = None,
                   detail: str | None = None) -> dict:
@@ -275,6 +286,10 @@ class FakeGame:
                 lo = CRITICAL_HULL_FLOOR if k == "critical_hull" else 0.05
                 v = max(lo, min(0.95, float(v)))
             new[k] = v
+        # critical_hull lives in [floor, min(bots_hull_below, 0.95)], re-clamped whenever either
+        # changes; when bots_hull_below is below the floor, the floor wins (ipc.md §5).
+        hi = min(new["bots_hull_below"], 0.95)
+        new["critical_hull"] = max(CRITICAL_HULL_FLOOR, min(hi, new["critical_hull"]))
         self.policy[scope] = new
         return True, dict(new), None
 
@@ -400,7 +415,7 @@ def load_script(path: str | os.PathLike) -> list[dict]:
 
 DIRECTIVES = {
     "send": {"raw"}, "send_raw": {"repeat", "newline"}, "hello": set(), "expect": {"timeout", "skip"},
-    "expect_closed": {"timeout"}, "expect_silence": set(), "ack": set(), "ptt": {"hold_ms"}, "sleep": set(),
+    "expect_closed": {"timeout"}, "expect_silence": set(), "ack": set(), "ptt": {"hold_ms", "reason"}, "sleep": set(),
     "auto_pong": set(), "disconnect": set(), "connect": {"hello"},
 }
 BOOL_KEYS = ("raw", "skip", "newline", "auto_pong", "disconnect", "expect_closed", "connect")
@@ -480,14 +495,18 @@ async def run_steps(game: FakeGame, steps: list[dict], default_timeout: float = 
                                err=a.get("err"), detail=a.get("detail"))
             elif kind == "ptt":
                 mode = step["ptt"]
-                if mode == "tap":
+                if "reason" in step and mode != "cancel":
+                    raise ValueError(f"'reason' goes only with ptt cancel, not {mode!r}")
+                if mode == "cancel":
+                    await game.ptt(False, reason=step.get("reason", "focus_lost"))
+                elif mode == "tap":
                     await game.ptt(True)
                     await asyncio.sleep(float(step.get("hold_ms", 200)) / 1000.0)
                     await game.ptt(False)
                 elif mode in ("down", "up"):
                     await game.ptt(mode == "down")
                 else:
-                    raise ValueError(f"ptt must be down|up|tap, got {mode!r}")
+                    raise ValueError(f"ptt must be down|up|tap|cancel, got {mode!r}")
             elif kind == "sleep":
                 await asyncio.sleep(float(step["sleep"]))
             elif kind == "auto_pong":

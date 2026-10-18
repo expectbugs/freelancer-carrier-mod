@@ -51,6 +51,19 @@ def test_script_reconnect(fakegame):
     run(body())
 
 
+def test_script_ptt_cancel(fakegame):
+    async def body():
+        async with running_app() as (app, port):
+            game = await fakegame.run_script_file(SCRIPTS_DIR / "ptt_cancel.ndjson", port)
+            assert [m["t"] for m in game.received] == ["welcome", "policy.set", "say"]
+            cancels = [m for m in game.sent if m["t"] == "ptt" and "reason" in m]
+            assert cancels == [{**cancels[0], "down": False, "reason": "focus_lost"}]
+            assert app.pipeline.cancelled == 1 and app.pipeline.utterances == 1
+            assert app.profile.transcriber.calls == 1  # only the second press was transcribed
+            assert game.violations == []
+    run(body())
+
+
 def test_script_version_mismatch(fakegame):
     async def body():
         async with running_app() as (app, port):

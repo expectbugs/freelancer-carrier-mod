@@ -23,24 +23,28 @@ KOKORO_SRC=<dir with kokoro-v1.0.onnx + voices-v1.0.bin> sidecar/setup_venv.sh -
 
 ```bash
 sidecar/run.sh                          # live profile, 127.0.0.1:29170 (the play install)
-sidecar/run.sh --profile test           # harness, lanes, soaks, CI: null sink, fakes, no devices
-sidecar/run.sh --profile test --port 29171 --mic-file order.wav
-sidecar/run.sh --selftest               # server up, fake client handshake, clean shutdown, exit 0/1
+sidecar/run.sh --profile test --port 29171   # harness, lanes, soaks, CI: null sink, fakes, no devices
+FLCOPILOT_PORT=29171 sidecar/run.sh --profile test --mic-file order.wav
+sidecar/run.sh --selftest               # ephemeral port: server up, fake client handshake, clean shutdown, exit 0/1
 sidecar/run.sh --discover-mic           # resolve mic_match to a capture source (prints the name locally)
 sidecar/run.sh --print-config           # effective config (mic_match masked)
-sidecar/run.sh --tool voice_smoke       # offline Kokoro -> WAV -> Whisper (GPU) smoke, into $FLMOD_TESTRUNS
-sidecar/run.sh --tool fakegame --port 29170 sidecar/tests/scripts/handshake.ndjson
+sidecar/run.sh --tool voice_smoke --require-cuda   # offline Kokoro -> WAV -> Whisper (GPU) smoke, into $FLMOD_TESTRUNS
+sidecar/run.sh --tool fakegame --port 29171 sidecar/tests/scripts/handshake.ndjson
 ```
 
 When serving, the sidecar prints `FLCOPILOT ready host=127.0.0.1 port=<n> profile=<p> pid=<pid>` on stdout and stops cleanly on SIGTERM/SIGINT (it sends `bye{reason:"shutdown"}` first). Exit codes: 0 ok, 1 selftest/discovery failed, 2 config or profile error, 3 cannot listen.
+
+**The play port is guarded.** The test profile refuses 29170 (exit 2): its fake brain would send canned `policy.set` commands into the real game, and the DLL keeps the last applied policy. `fakegame` needs `--port` or `FLCOPILOT_PORT` and refuses 29170 too, because its `hello` would replace the real game's session. Override only on purpose, with `--allow-play-port` (or `FLCOPILOT_ALLOW_PLAY_PORT=1` for the sidecar).
+
+`voice_smoke` results: `ok`; `ok-cpu-fallback` (CUDA failed, Whisper ran on CPU `int8`; exit 0); `fail` (exit 1). With `--require-cuda` no CPU fallback is attempted, so a broken CUDA setup fails the gate.
 
 ## Ports
 
 | Who | Port |
 |---|---|
-| Play install | 29170 |
+| Play install | 29170 (live profile only) |
 | Test lane N | 29170 + N, from `FLCOPILOT_PORT` (exported by `harness/lane.sh`, CONVENTIONS §7) |
-| Unit tests | ephemeral (`--port 0`) |
+| Unit tests, `--selftest` | ephemeral (`--port 0`; the selftest's default) |
 
 Precedence: `--port` > `FLCOPILOT_PORT` > local overlay > `config/flcopilot.toml`. The listen address is always `127.0.0.1` and is not configurable.
 
