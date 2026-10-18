@@ -239,6 +239,7 @@ Key names are **`va_free_mb` / `va_largest_free_mb`**; `vmstat` prints the same 
 - The generators read them from the local install at deploy time (`gen/plugins/*`).
 - Golden files derived from game data live in `$FLMOD_GOLDEN`.
 - Committed YAML holds only our own design values and references by nickname.
+- **Authored-data marker (D108, D112).** An authored file that uses FL-native key names in bulk (e.g. our `fcm.world.v1` fixtures, NPC definitions, carrier catalogs) carries the public checker's authored-data marker with a one-line reason: a whole comment line `check_public: authored-data <reason>` in its first 5 lines, or (the only form for JSON) a sibling file `<file>.authored-data` containing the reason. Allowed only under `data/`, `tests/`, `harness/`, `gen/`, `docs/spec/` and `src/**/tests/`. The marker is for our own values only; reviewers check the reason, and values copied from game files remain forbidden.
 
 ## 13. Sidecar safety in tests [#27]
 
