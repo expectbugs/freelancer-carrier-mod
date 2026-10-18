@@ -1,17 +1,37 @@
-# cmake/LogicIncludeLint.cmake: fail the build if engine-free code includes Windows, Freelancer, FLUF
-# or hook-library headers. Run as a script:
-#   cmake -DFLMOD_LINT_DIR=<dir> [-DFLMOD_LINT_STAMP=<file>] -P cmake/LogicIncludeLint.cmake
-# The host header check (logic_header_check) catches the same thing by compilation; this lint also
-# runs in win32 builds, where <windows.h> would otherwise compile fine.
+# cmake/LogicIncludeLint.cmake: fail the build unless every #include in engine-free code is allowed.
+# Run as a script:
+#   cmake -DFLMOD_LINT_DIR=<dir> [-DFLMOD_LINT_SRC_ROOT=<src dir>] [-DFLMOD_LINT_STAMP=<file>] -P cmake/LogicIncludeLint.cmake
+#
+# Allowlist (anything else is rejected, including Windows-only headers behind #ifdef _WIN32):
+#   <...>  C++23 standard library headers, the C compatibility headers (<cstdio>, <stdio.h>, ...),
+#          and <nlohmann/...> (the project's JSON library)
+#   "..."  a file that exists relative to the including file or to FLMOD_LINT_SRC_ROOT, and lies under
+#          src/logic/ or src/contracts/
+# The host header check (tests/host/LogicHeaderCheck.cmake) catches the same class of problem by compilation;
+# this lint also runs in win32 builds, where <windows.h> would otherwise compile fine.
 
 if(NOT FLMOD_LINT_DIR)
   message(FATAL_ERROR "LogicIncludeLint: pass -DFLMOD_LINT_DIR=<dir>")
 endif()
+if(NOT FLMOD_LINT_SRC_ROOT)
+  get_filename_component(FLMOD_LINT_SRC_ROOT "${FLMOD_LINT_DIR}/.." ABSOLUTE)
+endif()
 
-set(_bad_system_header "^(windows|winsock|winsock2|winuser|windef|winbase|winnt|winreg|wingdi|ws2tcpip|ws2def|mmsystem|psapi|tlhelp32|dbghelp|shlobj|objbase|combaseapi|dsound|ddraw|dxgi|d3d[0-9a-z_]*|d3dx[0-9a-z_]*|minhook)\\.h$")
-set(_bad_prefix "^(flcore|fluf|flsdk|imgui|imcp|minhook|freelancersdk)(/|\\.h|\\.hpp|$)")
-set(_bad_fluf "^(common|client|server)/fluf")
-set(_bad_exact "^(fluf\\.hpp|importfluf\\.hpp|st6\\.h|flcoredefs\\.hpp|flcoreserver\\.h|flcorecommon\\.h)$")
+set(_std_headers
+  # C++ library (C++23)
+  algorithm any array atomic barrier bit bitset charconv chrono codecvt compare complex concepts
+  condition_variable coroutine deque exception execution expected filesystem flat_map flat_set format
+  forward_list fstream functional future generator initializer_list iomanip ios iosfwd iostream istream
+  iterator latch limits list locale map mdspan memory memory_resource mutex new numbers numeric optional
+  ostream print queue random ranges ratio regex scoped_allocator semaphore set shared_mutex
+  source_location span spanstream sstream stack stacktrace stdexcept stdfloat stop_token streambuf string
+  string_view syncstream system_error thread tuple type_traits typeindex typeinfo unordered_map
+  unordered_set utility valarray variant vector version
+  # C compatibility headers
+  cassert cctype cerrno cfenv cfloat cinttypes climits clocale cmath csetjmp csignal cstdarg cstddef
+  cstdint cstdio cstdlib cstring ctime cuchar cwchar cwctype
+  assert.h ctype.h errno.h fenv.h float.h inttypes.h limits.h locale.h math.h setjmp.h signal.h stdarg.h
+  stddef.h stdint.h stdio.h stdlib.h string.h time.h uchar.h wchar.h wctype.h stdatomic.h)
 
 file(GLOB_RECURSE _files LIST_DIRECTORIES false
   "${FLMOD_LINT_DIR}/*.h" "${FLMOD_LINT_DIR}/*.hpp" "${FLMOD_LINT_DIR}/*.hh" "${FLMOD_LINT_DIR}/*.inl"
@@ -19,25 +39,53 @@ file(GLOB_RECURSE _files LIST_DIRECTORIES false
 
 set(_violations "")
 foreach(_f IN LISTS _files)
+  get_filename_component(_fdir "${_f}" DIRECTORY)
+  file(RELATIVE_PATH _rel "${FLMOD_LINT_DIR}" "${_f}")
   file(STRINGS "${_f}" _lines REGEX "^[ \t]*#[ \t]*include")
   foreach(_line IN LISTS _lines)
-    if(NOT _line MATCHES "^[ \t]*#[ \t]*include[ \t]*[<\"]([^>\"]+)[>\"]")
-      continue()
-    endif()
-    string(TOLOWER "${CMAKE_MATCH_1}" _inc)
-    string(REPLACE "\\" "/" _inc "${_inc}")
-    get_filename_component(_leaf "${_inc}" NAME)
-    if(_leaf MATCHES "${_bad_system_header}" OR _inc MATCHES "${_bad_prefix}" OR _inc MATCHES "${_bad_fluf}"
-       OR _leaf MATCHES "${_bad_exact}")
-      file(RELATIVE_PATH _rel "${FLMOD_LINT_DIR}" "${_f}")
-      string(APPEND _violations "  ${_rel}: ${_line}\n")
+    if(_line MATCHES "^[ \t]*#[ \t]*include[ \t]*<([^>]+)>")
+      set(_inc "${CMAKE_MATCH_1}")
+      if(_inc IN_LIST _std_headers OR _inc MATCHES "^nlohmann/")
+        continue()
+      endif()
+      string(APPEND _violations "  ${_rel}: ${_line}   (<${_inc}> is not a standard or allowed header)\n")
+    elseif(_line MATCHES "^[ \t]*#[ \t]*include[ \t]*\"([^\"]+)\"")
+      set(_inc "${CMAKE_MATCH_1}")
+      set(_resolved "")
+      foreach(_base IN ITEMS "${_fdir}" "${FLMOD_LINT_SRC_ROOT}")
+        if(NOT _resolved AND EXISTS "${_base}/${_inc}" AND NOT IS_DIRECTORY "${_base}/${_inc}")
+          get_filename_component(_resolved "${_base}/${_inc}" REALPATH)
+        endif()
+      endforeach()
+      set(_ok FALSE)
+      if(_resolved)
+        get_filename_component(_src_real "${FLMOD_LINT_SRC_ROOT}" REALPATH)
+        get_filename_component(_lint_real "${FLMOD_LINT_DIR}" REALPATH)
+        foreach(_allowed IN ITEMS "${_src_real}/logic" "${_src_real}/contracts" "${_lint_real}")
+          cmake_path(IS_PREFIX _allowed "${_resolved}" NORMALIZE _is_under)
+          if(_is_under)
+            set(_ok TRUE)
+          endif()
+        endforeach()
+      endif()
+      if(_ok)
+        continue()
+      endif()
+      if(_resolved)
+        string(APPEND _violations "  ${_rel}: ${_line}   (resolves outside src/logic and src/contracts)\n")
+      else()
+        string(APPEND _violations "  ${_rel}: ${_line}   (not found next to the file or under ${FLMOD_LINT_SRC_ROOT})\n")
+      endif()
+    else()
+      string(APPEND _violations "  ${_rel}: ${_line}   (unrecognised #include form)\n")
     endif()
   endforeach()
 endforeach()
 
 if(_violations)
   message(FATAL_ERROR
-    "src/logic must stay engine-free (no Windows, Freelancer, FLUF or hook headers; toolchain/README.md).\n"
+    "src/logic must stay engine-free: only standard headers, <nlohmann/...> and project headers under "
+    "src/logic or src/contracts (toolchain/README.md).\n"
     "Forbidden includes found under ${FLMOD_LINT_DIR}:\n${_violations}")
 endif()
 

@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 # CI stage 10 (build), owned by P0-TOOLCHAIN. Protocol: harness/ci.d/README.md (P0-REPO).
-#   in:  CI_MODE=quick|default|full  CI_LANES=N  CI_RUNDIR=<run dir>
-#   out: "CI build: PASS|FAIL|SKIP (<reason>)", exit 0 | 1 | 77
-# Configures and builds the `host` preset and the win32 preset(s): FLMOD_TRACK=A|B picks one track;
-# unset (before Gate 0a decides) builds every track whose inputs are present.
+#   in:  CI_MODE  CI_LANES  CI_RUNDIR  CI_REPO_ROOT (the work tree under test)  [FLMOD_TRACK=A|B]
+#   out: logs in $CI_RUNDIR/10-build/; verdict line "CI build: PASS|FAIL|SKIP (<reason>)"; exit 0 | 1 | 77
+# Configures and builds the `host` preset and the win32 preset(s) in CI_REPO_ROOT/build/<preset>:
+# FLMOD_TRACK=A|B picks one track; unset (before Gate 0a decides) builds every track whose inputs exist.
 set -uo pipefail
 
 NAME=build
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-RUNDIR=${CI_RUNDIR:-$(mktemp -d)}
-mkdir -p "$RUNDIR"
+STAGE_DIR=10-build
+REPO=${CI_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
+TESTRUNS=${FLMOD_TESTRUNS:-/home/user/freelancer/carrier-mod/local/testruns}
+RUNDIR=${CI_RUNDIR:-$TESTRUNS/$(date -u +%Y%m%dT%H%M%SZ)-ci-$NAME}
+OUT="$RUNDIR/$STAGE_DIR"
+mkdir -p "$OUT"
 LLVM=/usr/lib/llvm/22/bin
 XWIN_ROOT=${XWIN_ROOT:-/home/user/opt/xwin}
 FLMOD_VENDOR=${FLMOD_VENDOR:-/home/user/freelancer/carrier-mod/vendor}
 export XWIN_ROOT FLMOD_VENDOR
 
 skip() { echo "CI $NAME: SKIP ($*)"; exit 77; }
-[[ -f $REPO/CMakePresets.json ]] || skip "no CMakePresets.json"
+[[ -f $REPO/CMakePresets.json ]] || skip "no CMakePresets.json in $REPO"
 command -v cmake >/dev/null && command -v ninja >/dev/null || skip "cmake/ninja not installed"
 [[ -x $LLVM/clang++ ]] || skip "$LLVM/clang++ missing"
 [[ -f $FLMOD_VENDOR/doctest/.flmod-pin ]] || skip "vendor tree missing (run toolchain/fetch_vendor.sh)"
@@ -39,7 +42,7 @@ fi
 
 fail=()
 for p in "${presets[@]}"; do
-  log="$RUNDIR/10-build-$p.log"
+  log="$OUT/$p.log"
   if (cd "$REPO" && cmake --preset "$p" && cmake --build --preset "$p") >"$log" 2>&1; then
     echo "  $p: ok ($log)"
   else

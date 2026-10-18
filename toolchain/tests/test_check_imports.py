@@ -37,17 +37,60 @@ AMD64 = "ImageFileHeader {\n  Machine: IMAGE_FILE_MACHINE_AMD64 (0x8664)\n}\n"
 
 
 def imports_text(mods: dict[str, list[str]], delay: set[str] | None = None) -> str:
+    """Render imports exactly like llvm-readobj 22 --coff-imports (see REAL_DELAY_OUTPUT below)."""
     out = []
     for name, syms in mods.items():
-        kind = "DelayImport" if delay and name in delay else "Import"
-        out.append(f"{kind} {{\n  Name: {name}\n  ImportLookupTableRVA: 0x1000\n")
-        for s in syms:
-            if s.startswith("#"):
-                out.append(f"  Symbol:  ({s[1:]})\n")
+        if delay and name in delay:
+            out.append(f"DelayImport {{\n  Name: {name}\n  Attributes: 0x1\n  ModuleHandle: 0x40A0\n"
+                       "  ImportAddressTable: 0x40A8\n  ImportNameTable: 0x318C\n  BoundDelayImportTable: 0x0\n"
+                       "  UnloadDelayImportTable: 0x0\n")
+            for s_ in syms:
+                sym = f"  ({s_[1:]})" if s_.startswith("#") else f" {s_} (0)"
+                out.append(f"  Import {{\n    Symbol:{sym}\n    Address: 0x1000245D\n  }}\n")
+            out.append("}\n")
+            continue
+        out.append(f"Import {{\n  Name: {name}\n  ImportLookupTableRVA: 0x1000\n  ImportAddressTableRVA: 0x2000\n")
+        for s_ in syms:
+            if s_.startswith("#"):
+                out.append(f"  Symbol:  ({s_[1:]})\n")
             else:
-                out.append(f"  Symbol: {s} (7)\n")
+                out.append(f"  Symbol: {s_} (7)\n")
         out.append("}\n")
     return "".join(out)
+
+
+# Verbatim `llvm-readobj --coff-imports` (LLVM 22.1.8) of a clang-cl i686 DLL that delay-loads two USER32
+# functions (review r1 probe delay.dll), trimmed to two modules.
+REAL_DELAY_OUTPUT = """
+File: delay.dll
+Format: COFF-i386
+Arch: i386
+AddressSize: 32bit
+Import {
+  Name: VCRUNTIME140.dll
+  ImportLookupTableRVA: 0x32B0
+  ImportAddressTableRVA: 0x3324
+  Symbol: __std_type_info_destroy_list (37)
+  Symbol: _except_handler4_common (53)
+}
+DelayImport {
+  Name: USER32.dll
+  Attributes: 0x1
+  ModuleHandle: 0x40A0
+  ImportAddressTable: 0x40A8
+  ImportNameTable: 0x318C
+  BoundDelayImportTable: 0x0
+  UnloadDelayImportTable: 0x0
+  Import {
+    Symbol: GetSystemMetrics (0)
+    Address: 0x1000245D
+  }
+  Import {
+    Symbol: MessageBeep (0)
+    Address: 0x10002467
+  }
+}
+"""
 
 
 def exports_text(names: list[str], ordinals: list[int] | None = None) -> str:
@@ -139,6 +182,14 @@ def test_missing_ordinal_fails(env, capsys):
     assert "MSVCP140.dll: #43" in capsys.readouterr().out
 
 
+def test_missing_any_crt_dll_fails(env, capsys):
+    for extra in ("msvcp140d.dll", "VCRUNTIME140_1.dll", "msvcp140_2.dll"):
+        mods = good_imports() | {extra: ["?something@@YAXXZ"]}
+        dll = make_pe(env["tmp"] / "out" / "crt_extra.dll", imports=imports_text(mods))
+        assert run(env, [dll]) == 1, extra
+        assert "reference DLL missing" in capsys.readouterr().out
+
+
 def test_missing_required_crt_dll_fails(env, capsys):
     mods = good_imports() | {"msvcp140_atomic_wait.dll": ["__std_atomic_wait_direct"]}
     dll = make_pe(env["tmp"] / "out" / "aw.dll", imports=imports_text(mods))
@@ -194,6 +245,25 @@ def test_json_report(env, tmp_path):
     data = json.loads(report.read_text())
     assert data["result"] == "PASS"
     assert data["binaries"][0]["ok"] is True
+
+
+def test_parse_real_delay_import_output():
+    mods = ci.parse_imports(REAL_DELAY_OUTPUT)
+    assert [(m.name, m.delay, m.symbols) for m in mods] == [
+        ("VCRUNTIME140.dll", False, ["__std_type_info_destroy_list", "_except_handler4_common"]),
+        ("USER32.dll", True, ["GetSystemMetrics", "MessageBeep"]),
+    ]
+
+
+def test_delay_import_symbols_are_checked(env, capsys):
+    mods = good_imports()
+    del mods["common.dll"]
+    mods["common.dll"] = ["?CreateID@@YAIPBD@Z", "NotInHde"]
+    dll = make_pe(env["tmp"] / "out" / "delaycommon.dll", imports=imports_text(mods, delay={"common.dll"}))
+    assert run(env, [dll]) == 1
+    out = capsys.readouterr().out
+    assert "common.dll (delay)" in out
+    assert "MISSING delaycommon.dll -> common.dll (delay): NotInHde" in out
 
 
 def test_parse_imports_handles_delay_and_ordinals():

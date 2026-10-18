@@ -14,6 +14,7 @@ ehp_base_catch_in_catch	base	2	pass	pass	try/catch nested inside a catch block
 ehp_a_seh_regs_raw	a	1	broken	broken	(a) a __try function returns with EBX/ESI/EDI clobbered (clang codegen); ABI.md §6.1
 ehp_a_seh_regs_guarded	a	1	pass	pass	(a) the flmod_seh_guard pattern (clobber barrier) keeps the caller's registers
 ehp_a_seh_guard_no_fault	a	42	pass	pass	(a) flmod_seh_guard without a fault
+ehp_a_seh_guard_cxx_exception	a	11	pass	pass	(a) a C++ exception inside the guard: code 0xE06D7363, destructors run
 ehp_b_catchall_av_inline	b	11	broken	broken	(b) catch(...) misses an AV in the function's own body; ABI.md §6.2
 ehp_b_catchall_av_call	b	12	broken	broken	(b) catch(...) misses an AV in a callee clang proved nounwind
 ehp_b_catchall_av_opaque_call	b	13	pass	pass	(b) catch(...) sees an AV inside an opaque call under /EHa (do not rely on it)

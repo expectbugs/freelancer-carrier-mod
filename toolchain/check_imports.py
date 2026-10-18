@@ -11,9 +11,9 @@ Checks, per binary:
        MSVC runtime       msvcp140*.dll vcruntime140*.dll api-ms-win-crt-*.dll
        Win32              kernel32 user32 gdi32 advapi32 ws2_32 d3d9 dsound ole32 oleaut32 shell32
                           winmm version psapi dbghelp
-  3. Every symbol imported from msvcp140.dll, vcruntime140.dll and msvcp140_atomic_wait.dll is in the
-     export table of that DLL in <prefix>/drive_c/windows/syswow64/ (the Wine builtins). Imports from
-     the other msvcp140_*/vcruntime140_* DLLs are checked the same way when the DLL exists there.
+  3. Every imported msvcp140*/vcruntime140* DLL (msvcp140, vcruntime140, msvcp140_atomic_wait, msvcp140_1, ...)
+     exists in <prefix>/drive_c/windows/syswow64/ (the Wine builtins), and every symbol imported from it is in
+     that DLL's export table. A missing DLL (e.g. msvcp140d.dll) is a failure.
   4. api-ms-win-crt-* imports are checked against syswow64/ucrtbase.dll, which Wine's apisetschema
      maps the whole api-ms-win-crt-* set to.
   5. Imports from Freelancer's DLLs are checked against the game's own EXE dir (found under the
@@ -49,8 +49,6 @@ SYSTEM_DLLS = {
     )
 }
 CRT_PATTERNS = ("msvcp140*.dll", "vcruntime140*.dll", "api-ms-win-crt-*.dll")
-# Symbol-checked against the Wine builtin of the same name (always; missing DLL = failure).
-CRT_REQUIRED_SYMBOL_CHECK = {"msvcp140.dll", "vcruntime140.dll", "msvcp140_atomic_wait.dll"}
 
 
 @dataclass
@@ -97,27 +95,38 @@ _SYMBOL_RE = re.compile(r"^\s*Symbol:\s*(.*?)\s*\((\d+)\)\s*$")
 
 
 def parse_imports(text: str) -> list[ImportedModule]:
-    """Parse `llvm-readobj --coff-imports` output (Import { } and DelayImport { } blocks)."""
+    """Parse `llvm-readobj --coff-imports` output.
+
+    Normal imports are flat `Import { Name: …  Symbol: … }` blocks. llvm-readobj 22 prints each delay-loaded module
+    as `DelayImport { Name: … Import { Symbol: … Address: … } Import { … } }`: one nested `Import {}` per symbol.
+    """
     mods: list[ImportedModule] = []
+    stack: list[str] = []          # open block kinds, outermost first
     cur: ImportedModule | None = None
     for line in text.splitlines():
         s = line.strip()
-        if s.startswith("Import {") or s.startswith("DelayImport {"):
-            cur = ImportedModule(name="", delay=s.startswith("DelayImport"))
-            mods.append(cur)
+        if s.endswith("{"):
+            kind = s[:-1].strip()
+            if not stack and kind in ("Import", "DelayImport"):
+                cur = ImportedModule(name="", delay=(kind == "DelayImport"))
+                mods.append(cur)
+            stack.append(kind)
+            continue
+        if s == "}":
+            if stack:
+                stack.pop()
+            if not stack:
+                cur = None
             continue
         if cur is None:
             continue
-        if s.startswith("Name:") and not cur.name:
+        if s.startswith("Name:") and len(stack) == 1 and not cur.name:
             cur.name = s.split(":", 1)[1].strip()
             continue
         m = _SYMBOL_RE.match(line)
         if m:
             name, hint_or_ordinal = m.group(1), m.group(2)
             cur.symbols.append(name if name else f"#{hint_or_ordinal}")
-            continue
-        if s == "}":
-            cur = None
     return [m for m in mods if m.name]
 
 
@@ -241,8 +250,9 @@ def check_binary(path: Path, args: argparse.Namespace, exports: ExportCache, sys
                 ref = find_case_insensitive(syswow64, "ucrtbase.dll")
                 required = True
             else:
+                # Any msvcp140*/vcruntime140* DLL must exist as a Wine builtin, or the load fails.
                 ref = find_case_insensitive(syswow64, key)
-                required = key in CRT_REQUIRED_SYMBOL_CHECK
+                required = True
         elif cat == "freelancer":
             ref = find_case_insensitive(game_exe_dir, key) if game_exe_dir else None
         elif cat == "fluf":

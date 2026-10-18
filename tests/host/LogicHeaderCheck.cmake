@@ -7,7 +7,9 @@
 #
 # Negative probes (not built by default) prove the mechanisms really reject Windows headers:
 #   logic_rejects_windows_h_compile  builds tests/host/negative/includes_windows_h.cpp, must FAIL
-#   logic_rejects_windows_h_lint     runs LogicIncludeLint over tests/host/negative/lint_fixture, must FAIL
+#   logic_rejects_forbidden_includes_lint  runs LogicIncludeLint over tests/host/negative/lint_fixture; must FAIL
+#                                    naming every bad include (Windows.h, synchapi.h behind #ifdef, io.h, tchar.h,
+#                                    an unresolved quoted include)
 
 set(_hc_dir "${CMAKE_BINARY_DIR}/generated/logic_header_check")
 set(_hc_sources "")
@@ -37,19 +39,25 @@ if(_hc_sources)
   set_tests_properties(logic_headers_standalone PROPERTIES RESOURCE_LOCK flmod_build_dir)
 endif()
 
+# Negative probes. tests/host/ExpectFailure.cmake requires a non-zero exit AND the specific error text, so a
+# broken toolchain or a missing target cannot make them pass.
 add_library(logic_negative_probe OBJECT EXCLUDE_FROM_ALL
   "${PROJECT_SOURCE_DIR}/tests/host/negative/includes_windows_h.cpp")
 target_include_directories(logic_negative_probe PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(logic_negative_probe PRIVATE flmod::nlohmann_json)
 add_test(NAME logic_rejects_windows_h_compile
-  COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target logic_negative_probe)
-set_tests_properties(logic_rejects_windows_h_compile PROPERTIES WILL_FAIL TRUE RESOURCE_LOCK flmod_build_dir)
+  COMMAND "${CMAKE_COMMAND}"
+          "-DFLMOD_CMD=${CMAKE_COMMAND};--build;${CMAKE_BINARY_DIR};--target;logic_negative_probe"
+          "-DFLMOD_EXPECT='windows.h' file not found;includes_windows_h.cpp"
+          -P "${PROJECT_SOURCE_DIR}/tests/host/ExpectFailure.cmake")
+set_tests_properties(logic_rejects_windows_h_compile PROPERTIES RESOURCE_LOCK flmod_build_dir)
 
-add_test(NAME logic_rejects_windows_h_lint
-  COMMAND "${CMAKE_COMMAND}" "-DFLMOD_LINT_DIR=${PROJECT_SOURCE_DIR}/tests/host/negative/lint_fixture"
-          -P "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake")
-set_tests_properties(logic_rejects_windows_h_lint PROPERTIES WILL_FAIL TRUE)
+add_test(NAME logic_rejects_forbidden_includes_lint
+  COMMAND "${CMAKE_COMMAND}"
+          "-DFLMOD_CMD=${CMAKE_COMMAND};-DFLMOD_LINT_DIR=${PROJECT_SOURCE_DIR}/tests/host/negative/lint_fixture;-DFLMOD_LINT_SRC_ROOT=${PROJECT_SOURCE_DIR}/src;-P;${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake"
+          "-DFLMOD_EXPECT=Forbidden includes;bad_header.hpp: #include <Windows.h>;bad_ifdef.hpp: #include <synchapi.h>;bad_crt.hpp: #include <io.h>;bad_crt.hpp: #include <tchar.h>;bad_quoted.hpp: #include .game/fl_adapter.hpp."
+          -P "${PROJECT_SOURCE_DIR}/tests/host/ExpectFailure.cmake")
 
 add_test(NAME logic_include_lint_passes
-  COMMAND "${CMAKE_COMMAND}" "-DFLMOD_LINT_DIR=${FLMOD_LOGIC_DIR}"
+  COMMAND "${CMAKE_COMMAND}" "-DFLMOD_LINT_DIR=${FLMOD_LOGIC_DIR}" "-DFLMOD_LINT_SRC_ROOT=${PROJECT_SOURCE_DIR}/src"
           -P "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake")

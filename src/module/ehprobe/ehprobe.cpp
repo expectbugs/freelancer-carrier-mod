@@ -48,6 +48,11 @@ __declspec(noinline) void throw_logic() { throw std::logic_error("deep"); }
 __declspec(noinline) void do_av() { *(volatile int*)nullptr = 1; }
 void av_cb(void*) { *(volatile int*)nullptr = 2; }
 void ok_cb(void* ctx) { *static_cast<int*>(ctx) = 42; }
+void cxx_throw_cb(void*)
+{
+    Dtor d;
+    throw std::runtime_error("through the guard");
+}
 
 // Keeps four values live across fn() in callee-saved registers and checks them afterwards.
 __declspec(noinline) int keep_regs(int (*fn)())
@@ -229,6 +234,13 @@ EHP int ehp_base_catch_in_catch()
 // ----------------------------------------------------------------------------- (a) SEH __try / __except
 EHP int ehp_a_seh_regs_raw() { return keep_regs(&seh_raw); }  // 1 = INTACT
 EHP int ehp_a_seh_regs_guarded() { return keep_regs(&seh_guarded); }
+EHP int ehp_a_seh_guard_cxx_exception()
+{
+    // A C++ exception thrown inside the guard is swallowed as code 0xE06D7363; the destructor still runs.
+    g_dtors = 0;
+    const unsigned long code = flmod_seh_guard(&cxx_throw_cb, nullptr);
+    return g_dtors * 10 + (code == 0xE06D7363UL ? 1 : 0);  // 11
+}
 EHP int ehp_a_seh_guard_no_fault()
 {
     int v = 0;

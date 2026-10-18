@@ -38,8 +38,9 @@ xwin --accept-license --arch x86 --crt-version 14.51 --sdk-version 10.0.28000 \
 Why 14.51 and not the xwin default (manifest 17 = CRT 14.44): FLUF's prebuilt static libs
 (`FreelancerSDK.lib`, `yaml-cpp.lib`, `msgpack-c.lib`, `zstd_static.lib`) carry `/FAILIFMISMATCH:"annotate_optional=0"`
 and `/alternatename:__Avx2WmemEnabled=…`. `annotate_optional` exists in the 14.51 STL headers and not in 14.44,
-so FLUF was built with a v145 (VS 2026) STL. Our final link must use an STL at least that new (VERIFIED by grep of
-both header sets, 2026-10-17).
+so FLUF was built with a v145 (VS 2026) STL (VERIFIED by grep of both header sets, 2026-10-17). That our final
+link *needs* an STL at least that new is UNVERIFIED: `/FAILIFMISMATCH` only fails on conflicting values, and no
+14.44 link was tried. Matching FLUF's STL generation is the conservative choice.
 
 Package hashes (cache `dl/`):
 

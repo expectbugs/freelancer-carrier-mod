@@ -7,7 +7,8 @@
 # never edit this file:
 #   src/logic/**/*.cpp            -> static library `logic` (host and win32)
 #   tests/host/**/*.cpp,
-#   src/**/tests/*.cpp            -> `host_tests` (doctest, host builds only)
+#   src/**/tests/**/*.cpp         -> `host_tests` (doctest, host builds only)
+#   src/game/** is NOT globbed here: the module target that ships it (ARCH-0, src/module/<mod>/) globs it.
 #   src/module/*/CMakeLists.txt,
 #   spikes/*/CMakeLists.txt,
 #   harness/devbridge/CMakeLists.txt  -> add_subdirectory (each guards itself with flmod_track_only /
@@ -64,8 +65,10 @@ endif()
 # ------------------------------------------------------------------------------------- logic
 # Engine-free C++: no Windows, Freelancer, FLUF or hook headers (LogicIncludeLint + header check).
 set(FLMOD_LOGIC_DIR "${PROJECT_SOURCE_DIR}/src/logic")
-file(GLOB_RECURSE FLMOD_LOGIC_SOURCES CONFIGURE_DEPENDS "${FLMOD_LOGIC_DIR}/*.cpp")
-list(FILTER FLMOD_LOGIC_SOURCES EXCLUDE REGEX "/tests/")
+# Filters work on paths relative to the glob root, so a checkout under some .../tests/... directory is fine.
+file(GLOB_RECURSE _logic_rel RELATIVE "${FLMOD_LOGIC_DIR}" CONFIGURE_DEPENDS "${FLMOD_LOGIC_DIR}/*.cpp")
+list(FILTER _logic_rel EXCLUDE REGEX "(^|/)tests/")
+list(TRANSFORM _logic_rel PREPEND "${FLMOD_LOGIC_DIR}/" OUTPUT_VARIABLE FLMOD_LOGIC_SOURCES)
 if(NOT FLMOD_LOGIC_SOURCES)
   set(_ph "${CMAKE_BINARY_DIR}/generated/logic_placeholder.cpp")
   file(WRITE "${_ph}" "// Placeholder: src/logic has no sources yet.\nnamespace flmod::logic { int placeholder() { return 0; } }\n")
@@ -79,7 +82,7 @@ file(GLOB_RECURSE FLMOD_LOGIC_HEADERS CONFIGURE_DEPENDS
   "${FLMOD_LOGIC_DIR}/*.h" "${FLMOD_LOGIC_DIR}/*.hpp" "${FLMOD_LOGIC_DIR}/*.inl")
 add_custom_command(
   OUTPUT "${CMAKE_BINARY_DIR}/generated/logic_include_lint.stamp"
-  COMMAND "${CMAKE_COMMAND}" "-DFLMOD_LINT_DIR=${FLMOD_LOGIC_DIR}"
+  COMMAND "${CMAKE_COMMAND}" "-DFLMOD_LINT_DIR=${FLMOD_LOGIC_DIR}" "-DFLMOD_LINT_SRC_ROOT=${PROJECT_SOURCE_DIR}/src"
           "-DFLMOD_LINT_STAMP=${CMAKE_BINARY_DIR}/generated/logic_include_lint.stamp"
           -P "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake"
   DEPENDS ${FLMOD_LOGIC_SOURCES} ${FLMOD_LOGIC_HEADERS} "${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake"
@@ -107,10 +110,14 @@ endforeach()
 
 # ------------------------------------------------------------------------------- host_tests
 if(FLMOD_HOST)
-  file(GLOB_RECURSE _ht_sources CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/tests/host/*.cpp")
-  list(FILTER _ht_sources EXCLUDE REGEX "/tests/host/negative/")
-  file(GLOB_RECURSE _ht_src_tests CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.cpp")
-  list(FILTER _ht_src_tests INCLUDE REGEX "/tests/[^/]+\\.cpp$")
+  # tests/host/**/*.cpp (except negative/) and every .cpp at any depth below a tests/ dir under src/.
+  file(GLOB_RECURSE _ht_rel RELATIVE "${PROJECT_SOURCE_DIR}/tests/host" CONFIGURE_DEPENDS
+       "${PROJECT_SOURCE_DIR}/tests/host/*.cpp")
+  list(FILTER _ht_rel EXCLUDE REGEX "^negative/")
+  list(TRANSFORM _ht_rel PREPEND "${PROJECT_SOURCE_DIR}/tests/host/" OUTPUT_VARIABLE _ht_sources)
+  file(GLOB_RECURSE _ht_src_rel RELATIVE "${PROJECT_SOURCE_DIR}/src" CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.cpp")
+  list(FILTER _ht_src_rel INCLUDE REGEX "(^|/)tests/")
+  list(TRANSFORM _ht_src_rel PREPEND "${PROJECT_SOURCE_DIR}/src/" OUTPUT_VARIABLE _ht_src_tests)
   list(APPEND _ht_sources ${_ht_src_tests})
   get_property(_ht_extra GLOBAL PROPERTY FLMOD_HOST_TEST_SOURCES)
   get_property(_ht_libs GLOBAL PROPERTY FLMOD_HOST_TEST_LIBS)
@@ -118,4 +125,16 @@ if(FLMOD_HOST)
   target_link_libraries(host_tests PRIVATE logic flmod::doctest ${_ht_libs})
   target_include_directories(host_tests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tests/host")
   add_test(NAME host_tests COMMAND host_tests --reporters=console --no-colors=true)
+endif()
+
+# ------------------------------------------------------------------ win32 binary manifest
+# Every DLL/EXE registered through flmod_fluf_module / flmod_dacom_dll / flmod_win32_dll / flmod_win32_exe,
+# one absolute path per line. CI stage 50 (import-check) checks exactly these, never stale files in out/.
+if(NOT FLMOD_HOST)
+  get_property(_flmod_bins GLOBAL PROPERTY FLMOD_WIN32_BINARIES)
+  set(_flmod_bin_lines "")
+  foreach(_t IN LISTS _flmod_bins)
+    string(APPEND _flmod_bin_lines "$<TARGET_FILE:${_t}>\n")
+  endforeach()
+  file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/flmod_binaries.txt" CONTENT "${_flmod_bin_lines}")
 endif()
