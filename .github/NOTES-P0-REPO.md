@@ -5,7 +5,27 @@ Package P0-REPO owns `.github/` (this file, the workflow), `tools/check_public.p
 `requirements-dev.txt` (shared, append-only). This file moved here from `harness/ci.d/` in fix round 2 (review r2
 finding 7: that directory holds CI drop-ins, and the spec owns only its README).
 
-## RESUME POINT (fix round 2 of attempt 1, 2026-10-18): complete
+## RESUME POINT (follow-up `wp/P0-REPO-b`, review r3 MINORs + D112, 2026-10-18): complete
+
+P0-REPO r3 passed and was squash-merged (`eb051ed`). `wp/P0-REPO-b` (from main `3404144`, merged `--no-ff`) fixes
+the four r3 MINORs (`state/reports/P0-REPO-r3.md`) per D112 and CONVENTIONS §12. Evidence:
+`$FLMOD_TESTRUNS/20261018T083220Z-p0-repo-b/` (scripts in `scripts/`). `wp/P0-REPO` is closed; never touch it.
+
+| r3 # | What changed | Tests |
+|---|---|---|
+| 1 marker anywhere | The marker is a whole comment line (`#`, `//`, `;`, `--`, `<!-- -->`, `/* */`) in the first 5 lines, or a sibling file `<file>.authored-data` whose first non-blank line is the reason. `.json` takes only the sibling form. The `_check_public` JSON key is gone. Prose mentions, string values and markers buried in one-line JSON never count (r3 A14–A16). | `test_r5_authored_data_*` (sibling, comment forms, A14–A16, outside dirs, reason) |
+| 2 no protection under the marker | Under the marker, non-comment lines holding a game asset file reference (`.cmp .3db .mat .txm .ale .utf .wav .thn .sph .sur .vms .dfm .bini .mp3 .ogg .wma .wmv .bik`) or a backslash path stay R5 violations. The checker prints `check_public: AUTHORED-DATA <path> (<marker>)` per escaped file; `ci.sh` adds the count to the public stage line and lists the files in `summary.md` ("Authored-data escapes"). Messages say the marker is only for our own values. Archive members never use it. | `test_r5_authored_data_marker_keeps_asset_paths_as_violations`, `..._never_rescues_r1_r2_r4_or_r7`, `test_ci_public_stage_lists_every_authored_data_escape` |
+| 3 image metadata | Vetted PNG/JPEG are parsed. Metadata gets every text rule (plus base64 and R5): PNG tEXt, zTXt and iCCP (inflated, bounded), iTXt, every other non-pixel chunk, bytes after IEND; JPEG COM and APP0–15 (EXIF, XMP, ICC, IPTC), bytes after EOI. Pixel chunks/segments keep the reduced set. An image that does not parse is rejected (R1-image "malformed"). Violations show as `<image>!<chunk>`. | `test_r1_vetted_docs_image_metadata_gets_every_text_rule`, `..._pixels_get_...` |
+| 4 dict-literal recall (optional) | In code, list values of literal scalars count, and string-encoded vector lines (`'1, 2',`) count as FL-shaped; plain numeric array rows still do not. | compact/dict-literal test, `test_r5_own_code_with_fl_names_passes` |
+
+Measurements (`20261018T083220Z-p0-repo-b/`): R5 recall unchanged for text forms (98.8% / 96.5%); `.py` dict
+literals 92.5% → 94.2%; minified R3-data 15/15. R5 false positives 0 of 1204 text files (main @6bb6ef7,
+DATATOOLS @496fa64, HARNESS @e666b6d, SIDECAR @1f25681, TOOLCHAIN @5825345, this worktree); the full checker
+passes all five trees. Real HDE data converted and committed under `data/` WITH the marker: 70.1% (YAML + comment)
+and 68.4% (compact JSON + sibling) still rejected, against 0% in r3. Random-pixel PNG/JPEG with ordinary
+metadata: 0/300 and 0/300 flagged when vetted. Mutation check: 19 of 19 caught.
+
+## Fix round 2 (`wp/P0-REPO`, 2026-10-18): complete
 
 Review r2 (`state/reports/P0-REPO-r2.md`) and D108 are addressed on `wp/P0-REPO`. Nothing is left open for
 P0-REPO in this round. Evidence: `$FLMOD_TESTRUNS/20261018T073321Z-p0-repo-fix2/` (scripts in `scripts/`).
@@ -55,20 +75,15 @@ worktree and the main checkout, `scripts/r5eval.py` (recall and false positives)
 - Vetted images keep R5 on their bytes, besides the blocklist and real secret shapes.
 - In code files, a `section` key does not make INI sections count without FL key pairs.
 
-### For the orchestrator
+### For the orchestrator (done, kept for the record)
 
-- After merge: convert the short tailnet-host blocklist entry to `w:<literal>` (D108). Amend CONVENTIONS §12 to
-  require the `check_public: authored-data <reason>` header (JSON has no comments: put it in a string value of the
-  first key, e.g. `"_check_public": "check_public: authored-data …"`, and let the schema allow that key).
-- First push: squash-merge `wp/P0-REPO` (D106: intermediate commits fail `--commits=main..wp/P0-REPO`:
-  95db516 and 257ef54 spell the decomp name, and they and 32ab66a hold old api-key assignment test fixtures
-  that the D108 marker now matches; the tip is
-  clean, and `--commits=main` passes on all 54 commits of main @635be56), run
-  `tools/check_public.py --tree .` and `--commits=main`, push, then check the first Actions run on both Python
-  versions. No index or blocklist exists on Actions (R7 and the blocklist only warn there).
+- The tailnet-host blocklist entry was converted to the `w:` form and CONVENTIONS §12 documents the marker
+  (D112, superseding the `_check_public` JSON key suggested here in fix round 2).
+- `wp/P0-REPO` was squash-merged (D106: its intermediate commits failed `--commits`).
 
 ## History
 
 - Review r1 (F1–F13): fixed in `0ecf9b4`; see `20261018T052428Z-p0-repo-fix1/` and `state/reports/P0-REPO-r1.md`.
 - Session 2 re-check after the GPU-reset reboot: `32ab66a`.
-- Review r2: fixed in fix round 2 (this file).
+- Review r2: fixed in fix round 2; r3 PASS, squash-merged as `eb051ed`.
+- Review r3 MINORs + D112: `wp/P0-REPO-b` (RESUME POINT above).

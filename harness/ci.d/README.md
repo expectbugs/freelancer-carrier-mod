@@ -104,6 +104,8 @@ Each run writes `$FLMOD_TESTRUNS/<UTC stamp>-ci/summary.md`, the only file the o
 
 - a header: mode, lanes, `--only`, the repo and HEAD sha, the number of uncommitted paths, and start and finish times;
 - one line per stage: `CI <name>: PASS|FAIL|SKIP|NOT RUN <reason> [<secs>s] log: <path>`;
+- when the `public` stage accepted files under the authored-data marker (CONVENTIONS §12, D112), a section
+  "Authored-data escapes" listing each file and its marker, so reviewers check every reason;
 - a final line: `VERDICT: PASS|FAIL (<n> pass, <n> skip, <n> fail, <n> not run)`.
 
 While the run is going, the verdict reads `RUNNING`. If the run is interrupted, it reads `ABORTED`.
