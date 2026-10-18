@@ -37,3 +37,4 @@ venv/
 *.onnx
 *.carrier.json
 *.fl
+.pytest_cache/

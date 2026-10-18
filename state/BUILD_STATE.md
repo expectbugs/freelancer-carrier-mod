@@ -7,7 +7,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** not yet created (P0-HARNESS)
-- **Last update:** 2026-10-17T23:10 (P0 foundation spawned)
+- **Last update:** 2026-10-18T00:27 (P0: REPO+TOOLCHAIN fixing, DATATOOLS+SIDECAR in review, HARNESS running)
 
 ## Next actions
 1. ~~Env guards, manifest, venv, brain cwd, display-awake, IN_PROGRESS~~ (done 2026-10-17T23:08; manifest 8770 entries).
@@ -23,10 +23,10 @@ W4-ESC-* and FIX-* rows are appended when created.
 | ID | Wave | Type | Deps | Status | Attempts | Branch @ SHA | Merged | Notes |
 |---|---|---|---|---|---|---|---|---|
 | P0-REPO | 0 | impl | — | FIXING | 1 | wp/P0-REPO @ 257ef54 | | r1 CHANGES_REQUIRED (4 MAJOR); fix round 1 |
-| P0-TOOLCHAIN | 0 | impl | — | REVIEW | 1 | wp/P0-TOOLCHAIN @ 9d320f3 | | |
+| P0-TOOLCHAIN | 0 | impl | — | FIXING | 1 | wp/P0-TOOLCHAIN @ 9d320f3 | | r1 CHANGES_REQUIRED (1 MAJOR: EH under Wine); fix round 1 |
 | P0-HARNESS | 0 | impl | — | RUNNING | 1 | | | |
-| P0-DATATOOLS | 0 | impl | — | RUNNING | 1 | | | |
-| P0-SIDECAR | 0 | impl | — | RUNNING | 1 | | | |
+| P0-DATATOOLS | 0 | impl | — | REVIEW | 1 | wp/P0-DATATOOLS @ 1a99d13 | | r1 running |
+| P0-SIDECAR | 0 | impl | — | REVIEW | 1 | wp/P0-SIDECAR @ cf21a75 | | r1 running |
 | P0-TRACK-A | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | P0-TRACK-B | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | S-BASE | 0 | spike | G0a, P0-DATATOOLS | TODO | 0 | | | |
@@ -88,10 +88,12 @@ W4-ESC-* and FIX-* rows are appended when created.
 | af7c7d7da0b0d74b7 | P0-REPO | impl | 2026-10-17T23:11 | attempt 1 reported DONE 00:05; idle, resumable for fixes |
 | a6d079bb31f368f5b | P0-REPO | review r1 | 2026-10-18T00:07 | done: CHANGES_REQUIRED |
 | afd32a815c13c9fe1 | P0-TOOLCHAIN | impl | 2026-10-17T23:11 | attempt 1 reported DONE 00:13; idle, resumable |
-| aa8f1e4667ecb98c8 | P0-TOOLCHAIN | review r1 | 2026-10-18T00:14 | |
+| aa8f1e4667ecb98c8 | P0-TOOLCHAIN | review r1 | 2026-10-18T00:14 | done: CHANGES_REQUIRED |
 | a55157d6f12dd6759 | P0-HARNESS | impl | 2026-10-17T23:11 | attempt 1 |
-| a446e0585bf801c32 | P0-DATATOOLS | impl | 2026-10-17T23:11 | attempt 1 |
-| a5795216824605bda | P0-SIDECAR | impl | 2026-10-17T23:11 | attempt 1 |
+| a446e0585bf801c32 | P0-DATATOOLS | impl | 2026-10-17T23:11 | attempt 1 reported DONE ~00:23; idle |
+| a3d414faf5f1ca52a | P0-DATATOOLS | review r1 | 2026-10-18T00:25 | |
+| a5795216824605bda | P0-SIDECAR | impl | 2026-10-17T23:11 | attempt 1 reported DONE ~00:25; idle |
+| a1877e1749d92c531 | P0-SIDECAR | review r1 | 2026-10-18T00:27 | |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
