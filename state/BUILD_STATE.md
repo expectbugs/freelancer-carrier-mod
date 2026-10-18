@@ -7,13 +7,14 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-1/2 disposable; lane-6/7/8 leftovers HARNESS may delete). **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T02:10 (REPO, TOOLCHAIN, SIDECAR in r2 review; HARNESS, DATATOOLS running)
+- **Last update:** 2026-10-18T02:18 (REPO, TOOLCHAIN, SIDECAR in r2 review; DATATOOLS D107 addendum, r2 queued; HARNESS running)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
 1. Wait for the 5 running agents (table below). Each turn: check `STOP`, heartbeat, `local/gpu-fault.log`.
 2. After each fix report: save it to `state/reports/<ID>-f1.md`, then spawn a round-2 reviewer (`state/briefs/<ID>-r2.md` from REVIEWER_BRIEF_TEMPLATE; include the r1 findings and the f1 report). P0-HARNESS: save its report as `state/reports/P0-HARNESS-a1b.md` (attempt 1 continued); it gets its first review (r1) once it reports DONE.
 3. Merge order once each reviewer PASSes: P0-REPO first, squashed (D106; it brings the hooks and checker; then `git push origin main` after `tools/check_public.py --tree .` and `--commits` on the whole history; check the first Actions run), then the others. Run `python3 -I tools/check_public.py --commits=main..wp/<ID>` before every merge (squash per D106 if only intermediate commits fail), then `harness/ci.sh` after it.
+3b. P0-DATATOOLS r2 review: brief state/briefs/P0-DATATOOLS-r2.md is to be written after its D107 addendum lands; spawn when a reviewer slot frees (max 3). After both DATATOOLS and HARNESS merge, harness deploy.py switches its dacom.ini block to a `harness.dacom` fltools.patch unit (D107).
 4. When P0-TOOLCHAIN and P0-HARNESS are merged: brief and spawn P0-TRACK-A and P0-TRACK-B in parallel.
 5. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
 
@@ -26,7 +27,7 @@ W4-ESC-* and FIX-* rows are appended when created.
 | P0-REPO | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-REPO @ 32ab66a | | fix r1 DONE (f1 report; 183 tests); r2 reviewer running; squash-merge (D106); F9 blocklist entry added by orchestrator |
 | P0-TOOLCHAIN | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-TOOLCHAIN @ 0bceb22 | | fix r1 DONE (f1 report): -mstackrealign, EH probe 24/3/0 both tracks+CRTs, ci 10/20/50 PASS; CRT recommendation: builtin by default, native as TRACK-A fallback; r2 reviewer running |
 | P0-HARNESS | 0 | impl | — | RUNNING (a1 continued) | 1 | wp/P0-HARNESS @ a5bafe5 | | report state/reports/P0-HARNESS-a1.md; RESUME POINT at top of harness/NOTES.md; first after reboot: Track A DXVK boot + dacom stricmp crash triage, concurrency, spew allow-lists, vdesk input gate |
-| P0-DATATOOLS | 0 | impl | — | FIXING | 1 | wp/P0-DATATOOLS @ 463eb68 | | r1 fix round 1 ~half done (MAJOR1 done; MAJOR2/3 code done, tests missing; hygiene+validator MINORs not started); RESUME POINT in tools/fltools/NOTES.md |
+| P0-DATATOOLS | 0 | impl | — | FIXING (D107 addendum) | 1 | wp/P0-DATATOOLS @ 236b530 | | fix r1 DONE (f1 report; 115 tests, 20x clean); now adding harness.* unit preservation (D107); r2 review queued (reviewer slots full); squash-merge (D106: 463eb68/1a99d13 fail --commits); note for W1-DATA brief: REQ-9 CLI conflicts with fltools/CONVENTIONS |
 | P0-SIDECAR | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-SIDECAR @ 75da0e4 | | fix r1 DONE (f1 report): 306 tests x20 clean; CUDA voice_smoke PASS (stt 131 ms, tts first audio 374 ms); open proposal D7: lane.sh exports FLCOPILOT_FORCE_TEST_PROFILE=1; r2 reviewer running |
 | P0-TRACK-A | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | P0-TRACK-B | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
@@ -93,7 +94,7 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 | a51e1fa9688258fbd | P0-TOOLCHAIN | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE ~02:00 @ 0bceb22 (idle; resume via SendMessage for fix r2) |
 | a3ce63ff4e332397d | P0-TOOLCHAIN | review r2 | 2026-10-18T02:03 | |
 | aa760a6d5172501fc | P0-HARNESS | impl (a1 cont.) | 2026-10-18T01:44 | from a5bafe5 |
-| aeb69a8aaddaa49db | P0-DATATOOLS | impl (fix r1 cont.) | 2026-10-18T01:44 | from 463eb68 |
+| aeb69a8aaddaa49db | P0-DATATOOLS | impl (fix r1 cont.) | 2026-10-18T01:44 | f1 DONE ~02:15 @ 236b530; resumed 02:18 for D107 addendum |
 | ae243e39aecae6681 | P0-SIDECAR | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE ~02:09 @ 75da0e4 (idle; resume via SendMessage for fix r2) |
 | a0a202af5ab1a8be0 | P0-SIDECAR | review r2 | 2026-10-18T02:10 | |
 
