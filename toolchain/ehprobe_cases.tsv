@@ -1,0 +1,47 @@
+# EH regression probe expectations (toolchain/ehprobe.sh, src/module/ehprobe/ehprobe.cpp, toolchain/ABI.md §6).
+# case<TAB>group<TAB>want<TAB>builtin<TAB>native<TAB>note
+#   want     the value the case returns when the feature works
+#   builtin  expectation with Wine's builtin vcruntime140/msvcp140 (the default runtime): pass | broken
+#   native   expectation with MSVC's 14.51 vcruntime140/msvcp140 app-local (WINEDLLOVERRIDES=n,b): pass | broken
+# Status: expectation pass + works = PASS; pass + not = FAIL; broken + not = KNOWN-BROKEN; broken + works = PASS (unexpected).
+# A case that returns -77 lacks a prerequisite (e.g. no game EXE dir with Common.dll in the prefix): status SKIP.
+ehp_base_throw_int	base	8	pass	pass	plain throw/catch
+ehp_base_std_exception	base	3	pass	pass	std::exception by const ref
+ehp_base_cross_frame	base	4	pass	pass	throw in a noinline callee
+ehp_base_dtor_unwind	base	1	pass	pass	destructor runs during unwinding
+ehp_base_stoi	base	5	pass	pass	std::stoi throws std::invalid_argument from msvcp140
+ehp_base_eptr_outside_catch	base	1	pass	pass	exception_ptr rethrown outside a catch block
+ehp_base_catch_in_catch	base	2	pass	pass	try/catch nested inside a catch block
+ehp_a_seh_regs_raw	a	1	broken	broken	(a) a __try function returns with EBX/ESI/EDI clobbered (clang codegen); ABI.md §6.1
+ehp_a_seh_regs_guarded	a	1	pass	pass	(a) the flmod_seh_guard pattern (clobber barrier) keeps the caller's registers
+ehp_a_seh_guard_no_fault	a	42	pass	pass	(a) flmod_seh_guard without a fault
+ehp_a_seh_guard_cxx_exception	a	11	pass	pass	(a) a C++ exception inside the guard: code 0xE06D7363, destructors run
+ehp_b_catchall_av_inline	b	11	broken	broken	(b) catch(...) misses an AV in the function's own body; ABI.md §6.2
+ehp_b_catchall_av_call	b	12	broken	broken	(b) catch(...) misses an AV in a callee clang proved nounwind
+ehp_b_catchall_av_opaque_call	b	13	pass	pass	(b) catch(...) sees an AV inside an opaque call under /EHa (do not rely on it)
+ehp_c_rethrow_same_frame	c	2	pass	pass	(c) throw; from a catch, caught by a try in the same function (fixed by -mstackrealign)
+ehp_c_throw_new_from_catch_same_frame	c	1	pass	pass	(c) new throw from a catch, same function (fixed by -mstackrealign)
+ehp_c_rethrow_cross_noinline	c	2	pass	pass	(c) rethrow across a non-inlined call
+ehp_c_rethrow_cross_inlined	c	2	pass	pass	(c) rethrow from an inlined helper (fixed by -mstackrealign)
+ehp_c_rethrow_eptr_in_catch_same_frame	c	3	pass	pass	(c) std::rethrow_exception inside a catch, same function
+ehp_lib_rethrow_if_nested_in_catch	lib	5	pass	pass	std::throw_with_nested inside a catch block
+ehp_lib_vector_insert_throw	lib	4	pass	pass	MSVC STL vector range insert: internal _CATCH_ALL ... _RERAISE
+ehp_lib_vector_insert_throw_wrapped	lib	4	pass	pass	same, called through a noinline wrapper
+ehp_json_parse_error	parse	101	pass	pass	nlohmann::json::parse throws parse_error 101
+ehp_json_parse_no_exceptions	parse	1	pass	pass	parse(..., nullptr, false) returns a discarded value
+ehp_json_type_error	parse	302	pass	pass	get<int>() on a string throws type_error 302
+ehp_json_at_same_frame	parse	401	pass	pass	array at(): nlohmann catches std::out_of_range and throws json::out_of_range
+ehp_json_at_wrapped	parse	401	pass	pass	same, through a noinline wrapper
+ehp_hook_engine_fault_guarded_regs	hook	9	pass	pass	AV inside the game's Common.dll (PhySys::DeactivatePhysics(0x10)) caught by flmod_seh_guard, registers intact; SKIP without the game dir
+ehp_hook_nested_guards	hook	1	pass	pass	flmod_seh_guard nested inside another guard's callback
+ehp_hook_finally_runs	hook	17	pass	pass	__finally runs while a fault unwinds to an outer guard
+ehp_hook_thread_eh	hook	6	pass	pass	C++ throw/catch on a worker thread
+ehp_hook_cxx_through_msvcrt_qsort	hook	5	pass	pass	C++ exception from our callback crosses msvcrt.dll (VC6 runtime) qsort frames to our catch
+ehp_hook_av_through_msvcrt_qsort_guarded	hook	1	pass	pass	AV in our callback under msvcrt.dll qsort, caught by an outer flmod_seh_guard
+ehp_hook_catch_inside_foreign_callback	hook	1	pass	pass	try/catch entirely inside a callback called by msvcrt.dll qsort
+ehp_hook_catch_vc6_thrown_int	hook	21	pass	pass	exception thrown by msvcrt.dll!_CxxThrowException (VC6 style) caught by catch(int)
+ehp_hook_catchall_vc6_thrown	hook	22	pass	pass	same, caught by catch(...)
+ehp_hook_template_ok	hook	1	pass	pass	ABI.md §6.7 hook template: normal path returns the result, no report, registers intact
+ehp_hook_template_cxx	hook	2	pass	pass	hook template: std::exception in the work is reported with its message, fallback returned
+ehp_hook_template_av_body	hook	3	pass	pass	hook template: AV in the body's own code reported (guard code or catch(...) possibly SEH), fallback
+ehp_hook_template_av_opaque	hook	4	pass	pass	hook template: AV inside an opaque call reported (catch(...) possibly SEH or guard code), fallback

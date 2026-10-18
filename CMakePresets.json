@@ -1,0 +1,75 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 29, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "host",
+      "displayName": "Host (Linux clang++ 22): src/logic + doctest host tests",
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/toolchain/host.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FLMOD_SANITIZE": "OFF"
+      }
+    },
+    {
+      "name": "host-asan",
+      "displayName": "Host with ASan + UBSan",
+      "inherits": "host",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "FLMOD_SANITIZE": "ON"
+      }
+    },
+    {
+      "name": "win32",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/toolchain/clang-cl-i686.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "win32-trackA",
+      "displayName": "Win32 i686 clang-cl, Track A (FLUF module)",
+      "inherits": "win32",
+      "cacheVariables": { "FLMOD_TRACK": "A" }
+    },
+    {
+      "name": "win32-trackB",
+      "displayName": "Win32 i686 clang-cl, Track B (plain dacom DLL)",
+      "inherits": "win32",
+      "cacheVariables": { "FLMOD_TRACK": "B" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "host", "configurePreset": "host" },
+    { "name": "host-asan", "configurePreset": "host-asan" },
+    { "name": "win32-trackA", "configurePreset": "win32-trackA" },
+    { "name": "win32-trackB", "configurePreset": "win32-trackB" }
+  ],
+  "testPresets": [
+    {
+      "name": "host",
+      "configurePreset": "host",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "host-asan",
+      "configurePreset": "host-asan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    }
+  ]
+}
