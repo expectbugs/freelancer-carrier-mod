@@ -164,7 +164,7 @@ Measured for the 5-word phrase in voice `am_michael` while game lanes were runni
 - W1-SIDECAR: verify `PULSE_SOURCE` + PortAudio `pulse` device actually selects the resolved source (capture.py comment); wire WhisperEngine/KokoroEngine into the live profile; the speech queue; the grammar.
 - W2-REFLEX: ipc.md §11 is the DLL contract, including the §4.7 stopped-tick MUSTs: the worker owns the heartbeat; `ev.pause{on}` plus one `state` per edge; commands queued while stopped (at most 64) and acked when applied; `ptt{down:false, reason}` whenever polling stops with the key held; unapplied commands dropped on disconnect. Test against `tools/fakegame.py` inverted, or run the real sidecar with `--profile test` on a lane port (it refuses 29170).
 - W4-BRAIN: use `brain.brain_command()`, `brain_env()` and `BRAIN_CWD`, and assert `check_init_message()` is empty on the first run (CONVENTIONS §13). The init-message field names (`tools`, `mcp_servers`) are UNVERIFIED until that live run.
-- Deploy (W1-SIDECAR / release): write the DLL INI `ptt_vk` from the sidecar's `ptt_key` (D24); `numpad_minus` also needs the keymap patch.
+- Deploy: write the DLL INI `ptt_vk` from the sidecar's `ptt_key` (D24); `numpad_minus` also needs the keymap patch. **Owner (orchestrator, review r2):** W2-REFLEX reads `ptt_vk` from the DLL INI on the DLL side, and W1-DATA's deploy integration writes it from `ptt_key`.
 - Harness: run sidecar tests with `$FLMOD_SIDECAR_VENV/bin/pytest -q sidecar/tests`. Under the shared `$FLMOD_VENV` (no numpy/sounddevice/kokoro) the audio-library tests skip with a reason and the rest pass. `lane.sh` should export `FLCOPILOT_FORCE_TEST_PROFILE=1` along with `FLCOPILOT_PORT` (D7).
 
 ## Review r1 fix round (2026-10-18)
@@ -220,6 +220,46 @@ GPU check before and after each GPU run: `nvidia-smi -q` showed "GPU Recovery Ac
 | `20261018T065455Z-sidecar-pytest-x20` | final code (8a23e7e): 306 tests × 20 runs, 0 failures (about 14.5 s per run). Under the shared `$FLMOD_VENV`: 281 passed, 15 skipped with reasons. |
 | `20261018T064942Z-sidecar-pytest-x20` | an earlier run while the last test was being edited: 19 of 20 clean; run 6 failed in the new test itself (an assertion filter that also matched the expected "close did not flush" warning, fixed in 8a23e7e), not in the sidecar code |
 
+## Review r2 polish (2026-10-18)
+
+Review r2 (`state/reports/P0-SIDECAR-r2.md`) passed with 5 MINORs, all closed here before ARCH-0 freezes ipc.md. New tests are in `tests/test_review_r2.py` (40). On the r2-reviewed code (75da0e4) with the new fakegame, 30 of them fail and 10 pass; the 10 are in-range accept-cases and "resume does not cancel" (`20261018T074506Z-sidecar-r2-prefix-regressions`).
+
+### Decisions (polish)
+
+- **D27 the tick is reported after `welcome`.** The DLL's first messages after `welcome` report the tick (running: `state`; stopped: `ev.pause{on:true}` + `state{rate:"paused"}`; menu: `ev.pause{on:true}` + `ev.menu` + `state{rate:"paused", ship:null}`). `Session.tick` is `unknown` until the first `state`/`ev.pause`/`ev.menu`, with ack timers suspended; after 5 s without a report it assumes `running` (warning). A later `state` never changes the tick; only edges do.
+- **D28 the game tick is the simulation step**, with one stopped flag (the OR of F1, unfocused, loading, menu), edges evaluated per frame from a hook that also runs while stopped, and a 1 s stall watchdog on a tick counter in the worker. The main menu is a stopped tick, and the worker answers commands there with `not_now` at once.
+- **D29 load boundaries** (save load, new game, respawn, main menu): queued commands are tagged with a game generation and acked `not_now` (`detail:"load"`) instead of being applied in another save. Gate and hole transitions are not boundaries.
+- **D30 ack order.** Acks of commands that reached the game thread are FIFO. Only the worker's immediate `ok:false` acks (rate_limited, queue full, not_now at the menu, validation errors) may overtake.
+- **D31 the outbox** never drops acks, control messages, `ptt` or lifecycle events. When full it drops the oldest `state` first, then the oldest other event. A hard cap (about 1024 lines or 1 MiB) closes the connection.
+- **D32 integer widths.** `seq`, `n` and `obj` are uint32, `gt` is int64 up to 2⁵³ − 1, and every other integer is int32. Any integer outside int64 makes the line malformed; an out-of-width known field makes the message invalid.
+- **D33 push-to-talk per session.** Only the session that owns the mic counts. A press while down, and a release or cancel while not down, are ignored (`ignored_ptt`). `ev.pause{on:true}`, `ev.menu` and `ev.load` cancel a held press.
+- **D34 unknown-type log cap.** The first 64 distinct unknown types per connection are logged at WARNING, then one cap notice, then DEBUG.
+- **D35 port-safe tests.** Play-port tests run in-process with serving and binding patched out, or in a private network namespace (`unshare -rn`, its own loopback) and are killed on any ready line. Without `unshare` they skip with a reason; the in-process ones always run.
+
+### Findings, fixes and tests
+
+| Finding | Fix | Tests |
+|---|---|---|
+| ipc.md gaps (a)–(f) | §4.1 tick report, §4.7.1 definitions, §4.7.4–6, §4.8, §7.3 ack order, §11 outbox and MUSTs, §3 integer widths; `server.py` `Session.tick`; `protocol.py` widths and int64 guard | `test_reconnect_while_paused_keeps_ack_timers_suspended`, `test_reconnect_at_the_main_menu_gets_not_now`, `test_ev_menu_alone_stops_the_tick`, `test_first_state_sets_the_tick[*]`, `test_running_tick_times_commands_out`, `test_no_report_after_welcome_assumes_running`, `test_integer_widths[*]`, `test_integers_outside_int64_are_malformed[*]`, `test_server_drops_out_of_range_integers` |
+| pipeline PTT state | D33 | `test_unmatched_release_and_cancel_are_ignored`, `test_repeated_press_is_ignored_and_one_utterance_follows`, `test_cancel_after_release_does_not_discard_the_utterance`, `test_tick_edges_cancel_a_held_press[*]`, `test_resume_does_not_cancel_a_press`, `test_ptt_from_a_session_that_does_not_own_the_mic_is_ignored` |
+| unknown-type WARNING flood | D34 | `test_unknown_type_warnings_are_capped` |
+| play-port test could hold 29170 | D35 | `test_cli_guard_refuses_before_anything_binds[*]`, `test_cli_selftest_picks_port_0_before_anything_binds`, `test_run_sh_test_profile_refuses_play_port[*]`, `test_selftest_defaults_to_an_ephemeral_port`, `test_fakegame_cli_needs_a_non_play_port[*]` |
+| `critical_hull` doc | `protocol.py` doc names min(bots_hull_below, 0.95) | `test_critical_hull_doc_names_the_cap` |
+
+The fakegame's `handshake()` now reports a running tick after `welcome`, like the DLL; `state=False` or a dict varies it. The scripts do the same. `test_handler_exception_is_contained` syncs with a ping first, so that state line cannot race the patch.
+
+### Evidence (VERIFIED, run dirs under `$FLMOD_TESTRUNS`)
+
+| Run | Result |
+|---|---|
+| `20261018T074534Z-sidecar-pytest-x5` | sidecar venv, dec1f45: 351 passed in each of 5 runs; shared `$FLMOD_VENV`: 326 passed, 15 skipped, each with a reason (`shared-venv.txt`) |
+| `20261018T074739Z-sidecar-ci-like` | fresh `git archive` copy outside the repo, `env -i`, `CUDA_VISIBLE_DEVICES=""`: sidecar venv 349 passed, 2 skipped (no local overlay); shared venv 324 passed, 17 skipped; both exit 0 |
+| `20261018T074824Z-sidecar-selftest-ss` | selftest ok on ephemeral port 37897; `--profile test` without a port: exit 2, no ready line; serving on 34613, only `127.0.0.1:34613` listens (no UDP, no IPv6); SIGTERM exit 0; no listener after |
+| `20261018T074428Z-sidecar-r2-guard-off-proof` | copy with every play-port guard disabled: 13 guard tests fail; a host-side poller saw 0 sockets on 29170 in 1050 samples over 9.4 s |
+| `20261018T074506Z-sidecar-r2-prefix-regressions` | r2 tests on 75da0e4: 30 failed, 10 passed (see above) |
+
+check_public (snapshot): `--tree` OK (152 files); `--commits=main..HEAD` OK.
+
 ## RESUME POINT
 
-Fix round 1 is complete: the code, tests and evidence are committed on `wp/P0-SIDECAR`. Nothing is pending in this package. Next: the orchestrator's re-review and merge.
+The review r2 polish is complete and committed on `wp/P0-SIDECAR`: all 5 MINORs are closed, with tests and evidence. Nothing is pending in this package. Next: the merge after P0-REPO (ci.sh and the hooks); the ARCH-0 freeze of `docs/spec/ipc.md`.
