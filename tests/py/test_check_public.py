@@ -717,6 +717,26 @@ def test_r1_vetted_docs_image_pixels_get_blocklist_secret_shapes_and_r5_only(tmp
     assert "a.png" not in out
 
 
+def test_r1_vetted_image_metadata_inflation_is_capped_per_image(tmp_path):
+    """Reviewer's case: 80 zTXt chunks, each inflating to just under 5 MB (400 MB in total), in a ~410 KB PNG."""
+    import time
+    blob = zlib.compress(b"a" * (5 * 1024 * 1024 - 64), 9)
+    bomb = make_png(chunks=tuple((b"zTXt", b"Comment\x00\x00" + blob) for _ in range(80)))
+    assert len(bomb) <= 512 * 1024
+    two = make_png(chunks=((b"zTXt", b"A\x00\x00" + zlib.compress(b"b" * 3_000_000)),
+                           (b"iTXt", b"B\x00\x01\x00\x00\x00" + zlib.compress(b"c" * 3_000_000))))
+    one = make_png(chunks=((b"zTXt", b"A\x00\x00" + zlib.compress(b"word " * 200_000)),))
+    t0 = time.monotonic()
+    rc, out = tree(tmp_path, {"docs/i/bomb.png": bomb, "docs/i/bomb.png.source": "own work\n",
+                              "docs/i/two.png": two, "docs/i/two.png.source": "own work\n",
+                              "docs/i/one.png": one, "docs/i/one.png.source": "own work\n"})
+    elapsed = time.monotonic() - t0
+    assert rc == 1 and elapsed < 2.0, (elapsed, out)
+    assert "FAIL docs/i/bomb.png: [R1-image] malformed PNG (compressed metadata expands beyond 5 MB in total)" in out
+    assert "FAIL docs/i/two.png: [R1-image] malformed PNG" in out  # 3 MB + 3 MB: each fine, together too much
+    assert "one.png" not in out
+
+
 def test_r1_vetted_docs_image_metadata_gets_every_text_rule(tmp_path):
     src = "own work (diagram)\n"
     ip, host = BAD_IPS["rfc1918-192"], j("zzhost.tail0a1b2", ".ts", ".net")
@@ -1039,6 +1059,30 @@ def test_r5_authored_data_marker_keeps_asset_paths_as_violations(tmp_path):
     for name in ("a.yaml", "b.yaml", "c.yaml", "d.json"):
         assert f"FAIL data/{name}: [R5-fl-data] authored-data marker" in out and "only for our own values" in out
     assert "FAIL data/ok.yaml" not in out and "AUTHORED-DATA data/ok.yaml" in out
+
+
+def _voice_lines(file_names: list[str], header: bool = True) -> str:
+    out = [f"# {AUTHORED} our copilot voice lines (W2-REFLEX)"] if header else []
+    out.append("voice_lines:")
+    for i, name in enumerate(file_names):
+        out += [f"  - nickname: fcm_vo_line_{i:02d}", f"    file: {name}", "    is_2d: true",
+                "    attenuation: -3", "    priority: 2"]
+    return "\n".join(out) + "\n"
+
+
+def test_r5_authored_data_marker_allows_our_own_fcm_asset_names(tmp_path):
+    ours = [f"fcm_vo_copilot_{i:02d}.wav" for i in range(25)]
+    rc, out = tree(tmp_path, {"data/audio/voice_lines.yaml": _voice_lines(ours)})
+    assert rc == 0 and "check_public: AUTHORED-DATA data/audio/voice_lines.yaml (comment line 1)" in out, out
+    rc, out = tree(tmp_path, {"data/audio/voice_lines.yaml": _voice_lines(ours, header=False)})
+    assert rc == 1 and "FAIL data/audio/voice_lines.yaml: [R5-fl-data] looks like FL game data" in out
+    vanilla = ours[:24] + ["zz_vanilla_npc_line_0101.wav"]
+    rc, out = tree(tmp_path, {"data/audio/voice_lines.yaml": _voice_lines(vanilla),
+                              "data/audio/b.yaml": _voice_lines(ours[:24] + [j("audio/fcm_dir/zz_line", ".wav")])})
+    assert rc == 1
+    for rel in ("data/audio/voice_lines.yaml", "data/audio/b.yaml"):
+        assert f"FAIL {rel}: [R5-fl-data] authored-data marker" in out and "vanilla game asset" in out, rel
+    assert "fcm_* file names" in out
 
 
 def test_r5_authored_data_marker_never_rescues_r1_r2_r4_or_r7(tmp_path, synthetic_index):

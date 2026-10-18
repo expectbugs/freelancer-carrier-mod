@@ -18,6 +18,12 @@ the four r3 MINORs (`state/reports/P0-REPO-r3.md`) per D112 and CONVENTIONS §12
 | 3 image metadata | Vetted PNG/JPEG are parsed. Metadata gets every text rule (plus base64 and R5): PNG tEXt, zTXt and iCCP (inflated, bounded), iTXt, every other non-pixel chunk, bytes after IEND; JPEG COM and APP0–15 (EXIF, XMP, ICC, IPTC), bytes after EOI. Pixel chunks/segments keep the reduced set. An image that does not parse is rejected (R1-image "malformed"). Violations show as `<image>!<chunk>`. | `test_r1_vetted_docs_image_metadata_gets_every_text_rule`, `..._pixels_get_...` |
 | 4 dict-literal recall (optional) | In code, list values of literal scalars count, and string-encoded vector lines (`'1, 2',`) count as FL-shaped; plain numeric array rows still do not. | compact/dict-literal test, `test_r5_own_code_with_fl_names_passes` |
 
+Review `P0-REPO-b-r1` (PASS, two MINORs), fixed on the same branch: (1) decompressed image metadata is capped at
+5 MB per image in total (the reviewer's 80 x 5 MB zTXt PNG is rejected as malformed in about 0.5 s; it took 490 s
+before); (2) under the marker, asset file names starting `fcm_` (our own generated assets, CONVENTIONS §2) are not
+game-asset references; vanilla names and backslash paths still are. Tests:
+`test_r1_vetted_image_metadata_inflation_is_capped_per_image`, `test_r5_authored_data_marker_allows_our_own_fcm_asset_names`.
+
 Measurements (`20261018T083220Z-p0-repo-b/`): R5 recall unchanged for text forms (98.8% / 96.5%); `.py` dict
 literals 92.5% → 94.2%; minified R3-data 15/15. R5 false positives 0 of 1204 text files (main @6bb6ef7,
 DATATOOLS @496fa64, HARNESS @e666b6d, SIDECAR @1f25681, TOOLCHAIN @5825345, this worktree); the full checker
