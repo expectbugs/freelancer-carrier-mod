@@ -7,7 +7,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-6/7/8 deleted). Measured: `LANES=4` on DXVK (~195 fps each), `LANES_SW=2` on wined3d-sw; Track A must use vdesk mode. **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T09:45Z (TRACK-A/B running; HARNESS-b in review)
+- **Last update:** 2026-10-18T10:00Z (TRACK-A/B running; HARNESS-b PASS → micro-fix)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
@@ -92,8 +92,8 @@ Opus 5.5 xhigh, worktree isolation.
 |---|---|---|---|---|
 | abdf0fe9fe8b438d3 | P0-TRACK-A | impl (spike, attempt 1) | 2026-10-18T09:27Z | from main 9ed5b56; brief state/briefs/P0-TRACK-A.md |
 | abf9280af309b9ff8 | P0-TRACK-B | impl (spike, attempt 1) | 2026-10-18T09:27Z | from main 9ed5b56; brief state/briefs/P0-TRACK-B.md |
-| aa760a6d5172501fc | P0-HARNESS | impl (follow-up wp/P0-HARNESS-b, D113) | 2026-10-18T09:27Z | DONE @ 37a268f (idle) |
-| ae9a5d0d12e392a5a | P0-HARNESS | review wp/P0-HARNESS-b | 2026-10-18T09:45Z | no pool lanes (tracks running) |
+| aa760a6d5172501fc | P0-HARNESS | impl (follow-up wp/P0-HARNESS-b, D113) | 2026-10-18T09:27Z | review PASS; micro-fix (contention skips, test_guards prefix) running |
+| ae9a5d0d12e392a5a | P0-HARNESS | review wp/P0-HARNESS-b | 2026-10-18T09:45Z | PASS ~10:00Z (state/reports/P0-HARNESS-b-r1.md); idle |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
