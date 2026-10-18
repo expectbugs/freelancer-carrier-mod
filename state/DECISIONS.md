@@ -169,3 +169,10 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
   - The `api_key` credential marker matches assignment/value form only (`api_key = …`, `"api_key": …`, `api_key: …`, `API_KEY=…`), not any identifier containing it. Real secret shapes are still matched everywhere.
 - **Why:** keeps the strong r1 gate on pasted game data while letting honest packages commit their own schemas; every escape is visible in review and in `git grep`.
 - **Decided by:** orchestrator
+
+## D109 — 2026-10-18 — P0-HARNESS: two blocked acceptance items carried to their owners
+- **Context:** P0-HARNESS attempt 1 ended PARTIAL with every REQ implemented. Two checks cannot run inside the package: (1) loading any `.fl` save on Track A crashes ~2 s after the menu (FLUF core alone reproduces it; the same install without FLUF.dll is fine; NOTES N7); (2) the post-campaign fixture's gate and bar checks need a devbridge `target`/`dock` verb, which W1-SPAWN/W1-CORE own (NOTES N15).
+- **Options:** keep HARNESS open until both resolve (blocks P0-TRACK-A/B, which need the harness); degrade; or review and merge HARNESS with the two items formally carried.
+- **Choice:** carry them. (1) belongs to P0-TRACK-A, whose spike scope is exactly "make Track A boot and load a save" (§4 items 1–2); its brief includes NOTES N7 as the starting point. (2) becomes an acceptance item for W1-HARNESS (fixture owner from Wave 1) once W1-SPAWN's `target` verb lands; until then the post-campaign fixture is marked "loads, no story script; gate/bar UNVERIFIED". The reviewer judges everything else on its merits.
+- **Why:** both items are genuinely outside the package's owned paths; holding HARNESS would stall the whole bake-off.
+- **Decided by:** orchestrator
