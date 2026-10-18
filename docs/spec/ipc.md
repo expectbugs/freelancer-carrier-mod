@@ -1,6 +1,6 @@
 # IPC protocol v1: game DLL ↔ copilot sidecar
 
-- **Status:** v1, written by P0-SIDECAR (2026-10-17). ARCH-0 freezes it after review. After that, a change either adds optional fields (no version bump) or bumps `v`.
+- **Status:** v1, written by P0-SIDECAR (2026-10-17; review round 1 fixes 2026-10-18). ARCH-0 freezes it after review. After that, a change either adds optional fields (no version bump) or bumps `v`.
 - **Source:** adapted from research R6 §2–§3 (gitignored `local/research/R6-copilot-sidecar.md`). The machine-readable twin of this file is `sidecar/flcopilot/protocol.py`; `sidecar/tests/test_protocol.py` checks that the two list the same message types.
 - **Implementations:** sidecar server `sidecar/flcopilot/server.py`; reference client `sidecar/tools/fakegame.py` (stdlib only, independent of the server code); in-game client W2-REFLEX (`src/game/ipc/`).
 
@@ -21,9 +21,10 @@ Design rule (DESIGN §11): fast code handles split-second actions; the LLM sets 
 
 - **NDJSON:** one UTF-8 JSON **object** per line, terminated by `\n`. A trailing `\r` before the `\n` is tolerated and ignored. Empty and whitespace-only lines are ignored.
 - **Size:** a line, including its `\n`, is at most **65 536 bytes** (64 KiB). Senders never produce a longer line.
+- **Objects:** duplicate keys are invalid (parsers disagree on which value wins). Senders never produce them; receivers drop such a line as malformed.
 - **Encoding:** compact JSON (`ensure_ascii` off). `NaN`, `Infinity` and numbers that overflow a double (for example `1e400`) are invalid, and so are `\uD800`–`\uDFFF` escapes that do not form a surrogate pair. JSON string escaping means a message can never contain a raw newline.
 - **Receiver behaviour on a bad line** (both sides). The line is logged and dropped; the connection stays up:
-  - not UTF-8, not JSON (including nesting too deep to parse), not an object, or an envelope error → dropped (`malformed`);
+  - not UTF-8, not JSON (including nesting too deep to parse and duplicate keys), not an object, or an envelope error → dropped (`malformed`);
   - longer than 64 KiB → skipped **up to and including its newline**, even if it arrives in many reads, so that the tail of an oversize line is never parsed as a new message (`oversize`);
   - a valid envelope with an invalid payload for a known type → dropped (`invalid`);
   - unknown `t` → ignored (§10).
@@ -38,7 +39,7 @@ Every message is a JSON object with these fields:
 | `t` | string | both | Message type, 1–64 chars (§6–§8). |
 | `seq` | int ≥ 0 | both | Per direction, per connection: starts at 1 and increases by 1 per message. Receivers log gaps and regressions but never reject on them. |
 | `gt` | int ≥ 0 | DLL only | Game time in ms on the DLL side. The DLL always sends it (0 when no game is loaded); it may restart after a load. The sidecar omits it. Receivers tolerate its absence. |
-| `id` | string | commands, acks | `[A-Za-z0-9_.:-]{1,32}` (whole string; patterns in this spec always match the whole value). The sidecar uses `c-<n>`, unique per connection. A top-level `id` means a command id and nothing else: payloads name object ids differently (`obj`, `wing`, `carrier`). |
+| `id` | string | commands, acks | `[A-Za-z0-9_.:-]{1,32}` (whole string; patterns in this spec always match the whole value). The sidecar uses `c-<n>` from a **per-process** counter, so an id never repeats across reconnects to the same sidecar process. A top-level `id` means a command id and nothing else: payloads name object ids differently (`obj`, `wing`, `carrier`). |
 
 Payload fields sit next to the envelope fields (flat, no nesting under a `payload` key).
 
@@ -60,11 +61,19 @@ bye{reason} ◀─────────────────────�
    - An invalid `hello` (a required field missing or of the wrong type) gets `bye{reason:"protocol"}`.
    - No `hello` within **5 s** of connecting gets `bye{reason:"protocol"}`.
    - Before `hello`, the sidecar answers `ping` and ignores everything else.
-   - A second `hello` on the same connection is answered with a fresh `welcome` (re-handshake; e.g. after loading a save).
-2. **Heartbeat.** After the handshake each side sends `ping{n}` every **2 s** (`welcome.heartbeat_ms`) and answers every received `ping` at once with `pong{n}` echoing `n`. Only `pong` resets the miss counter. After **3 consecutive pings without a pong**, a side closes the connection at its next tick, so a dead peer is detected within 6–8 s. The sidecar sends `bye{reason:"timeout"}` first; the DLL just closes and reconnects.
+   - The DLL sends `hello` **exactly once per connection**. A character or save change during a connection is reported with `ev.load` (or `ev.menu`), never with a second `hello`. A sidecar that does receive a second `hello` answers with a fresh `welcome` and replaces the stored hello fields (tolerated, not relied on).
+2. **Heartbeat.** The DLL's IPC worker thread owns the socket, the handshake and the heartbeat, independent of the game tick (§11). After the handshake each side sends `ping{n}` every **2 s** (`welcome.heartbeat_ms`) and answers every received `ping` at once with `pong{n}` echoing `n`. Only `pong` resets the miss counter. After **3 consecutive pings without a pong**, a side closes the connection at its next tick, so a dead peer is detected within 6–8 s. The sidecar sends `bye{reason:"timeout"}` first; the DLL just closes and reconnects.
 3. **Reconnect (DLL).** On EOF, error or timeout: close, then reconnect with backoff **1 s, 2 s, 5 s, 5 s…** (capped at 5 s). After `bye{reason:"version"}` or `bye{reason:"replaced"}`, wait **30 s** (two game instances on one port must not keep replacing each other). The connect itself is non-blocking `connect` plus `select` (≤ 250 ms) on the worker thread.
 4. **Shutdown.** The sidecar sends `bye{reason:"shutdown"}` and closes on SIGTERM/SIGINT; the DLL backs off normally. The DLL may send `bye{reason:"shutdown"}` on game exit.
-5. **State after reconnect.** The DLL keeps its **last applied policy** across disconnects and reports it in the next `hello.policy`. The sidecar must not assume its earlier commands survived a game restart; it re-sends what it wants (W1-SIDECAR: policy persistence).
+5. **Disconnect.** On disconnect the DLL **drops every command it has received but not yet applied**, and their acks. Nothing from an old connection is applied or acked after a reconnect. The sidecar resolves its unacked commands of that session as lost when the session ends.
+6. **State after reconnect.** The DLL keeps its **last applied policy** across disconnects and reports it in the next `hello.policy`. The sidecar must not assume its earlier commands survived a game restart; it re-sends what it wants (W1-SIDECAR: policy persistence).
+7. **Game tick stopped** (F1 pause, the unfocused-window pause, loading screens). Normative for both sides:
+   1. The DLL worker keeps answering `ping` and keeps sending its own pings while the tick is stopped, so a pause of any length never causes a timeout or a reconnect.
+   2. When the tick stops, the DLL sends `ev.pause{on:true}` and then one `state` with `rate:"paused"`. When it resumes, it sends `ev.pause{on:false}` and then one fresh `state`. **No `state` is sent in between** (no producer runs). Loading screens count as a stopped tick.
+   3. Commands that arrive while the tick is stopped are **queued by the worker** (in order; at most 64; beyond that the worker answers `err:"rate_limited"` at once) and **applied on the first tick after resume**. Each is acked only when applied, with `applied` as usual (a *deferred ack*). The DLL never acks before applying.
+   4. The sidecar suspends its 5 s ack timeout between `ev.pause{on:true}` and `ev.pause{on:false}` and restarts it in full on resume. An ack that still arrives after the timeout is a *late ack* (§7.3): the sidecar reconciles its world model from it.
+   5. **Push-to-talk:** whenever the DLL stops polling the key while it is held (focus lost, pause, menu, chat opened, or a deliberate disconnect), it sends `ptt{down:false, reason:…}` (§7.2). That cancels the utterance; the sidecar does not transcribe it. If the connection drops with the key held, the sidecar cancels the utterance when the session ends, and the DLL sends no release for the old press after reconnecting.
+8. **Main menu and multiplayer.** Returning to the main menu: the DLL sends `ev.menu`, then one `state` with `ship: null`; the connection stays up and the next game is announced with `ev.load`. The protocol is **single-player only**: on entering multiplayer the DLL sends `bye{reason:"shutdown", detail:"multiplayer"}`, closes, and stays offline until it is back in single player.
 
 ## 5. Common types
 
@@ -88,13 +97,13 @@ Used in `hello.policy.<scope>`, in `policy.set` and in its ack's `applied`. Ever
 | `auto_bots` | bool | — | `true` |
 | `bots_hull_below` | number | clamped to [0.05, 0.95] | 0.50 |
 | `bots_reserve` | int | clamped to [0, nanobot max stock] | 0 |
-| `critical_hull` | number | clamped to [`critical_hull_floor`, 0.95]; `critical_hull_floor` is an INI value (default 0.25). A command may raise the floor's trigger, never lower it below the INI floor. | 0.25 |
+| `critical_hull` | number | clamped to [`critical_hull_floor`, min(`bots_hull_below`, 0.95)]; `critical_hull_floor` is an INI value (default 0.25). A command may raise it, never lower it below the INI floor and never above `bots_hull_below`. If `bots_hull_below` is below the floor, `critical_hull` equals the floor (the floor wins). The clamp is re-applied whenever either field changes. | 0.25 |
 | `release_reserve_when` | string | `never`, `capital_hostile_present`, `target_is_capital` | `never` |
 | `auto_batts` | bool | — | `true` |
 | `batts_shield_below` | number | clamped to [0.05, 0.95] | 0.25 |
 | `batts_reserve` | int | clamped to [0, battery max stock] | 0 |
 
-**Hard floor (D-11.1).** Below `critical_hull` the reflex fires nanobots whenever any are in stock, regardless of `auto_bots`, `bots_reserve` and `release_reserve_when`. No command can disable this.
+**Hard floor (D-11.1).** Below `critical_hull` the reflex fires nanobots whenever any are in stock, regardless of `auto_bots`, `bots_reserve` and `release_reserve_when`. No command can disable this. Because `critical_hull` never exceeds `bots_hull_below`, raising it cannot turn the floor into a way of spending a reserve early: "save bots for the cruiser" holds until hull is genuinely critical.
 
 ## 6. Control messages
 
@@ -110,7 +119,7 @@ DLL → sidecar. The first message of every connection.
 | `save` | name, null ok | opt | save id; `null` if none loaded |
 | `policy` | object | opt | `{"player": Policy, "carrier": Policy}`: the policies currently applied |
 | `features` | list of name (≤ 32) | opt | DLL capabilities, e.g. `reflex`, `carrier`, `wing`. Lets a newer sidecar avoid commands an older DLL lacks. |
-| `ptt_vk` | int 1–255 | opt | the virtual-key code the DLL polls for push-to-talk (default 110, VK_DECIMAL). The sidecar logs a mismatch with its own `ptt_key`; the DLL's value wins. |
+| `ptt_vk` | int 1–255 | opt | the virtual-key code the DLL polls for push-to-talk, read from the DLL INI. **Source of truth:** at deploy, the installer writes the DLL INI `ptt_vk` from the sidecar config `ptt_key` (`numpad_period` = 110 = VK_DECIMAL, the default per DESIGN D-11.3; `numpad_minus` = 109, which also turns on the keymap patch that removes vanilla `USER_ZOOM_IN`). At runtime the DLL polls its INI value; both sides log a mismatch (see `welcome.ptt_vk`). |
 
 #### `welcome`
 
@@ -122,6 +131,7 @@ Sidecar → DLL. The reply to a supported `hello`.
 | `features` | list of string | yes | subset of `stt`, `tts`, `llm`, `grammar`: what this sidecar can do right now. If `tts` is present the DLL may leave dynamic lines to the sidecar (reflex callouts stay local). |
 | `heartbeat_ms` | int 10–60000 | opt | the ping interval the sidecar uses (2000; tests use less) |
 | `profile` | string | opt | `live` or `test` (informational, for logs) |
+| `ptt_vk` | int 1–255 | opt | the VK the sidecar's `ptt_key` maps to. The DLL logs a mismatch with its INI value and keeps polling its own. |
 
 #### `bye`
 
@@ -147,11 +157,11 @@ Either direction, immediately on a `ping`. `n` (int ≥ 0, opt): the `n` of that
 
 #### `state`
 
-A **coalesced full snapshot**: the DLL keeps only the latest unsent one. It is sent at **2 Hz** in space with hostiles present, **0.5 Hz** in space and calm, and **0.1 Hz** when docked or paused. A group that a DLL build cannot provide is absent; a group that applies but is empty is `null` (for example `target: null`).
+A **coalesced full snapshot**: the DLL keeps only the latest unsent one. It is sent at **2 Hz** in space with hostiles present, **0.5 Hz** in space and calm, and **0.1 Hz** when docked. While the game tick is stopped none is sent, apart from the single `rate:"paused"` snapshot at the start of the pause (§4.7). A group that a DLL build cannot provide is absent; a group that applies but is empty is `null` (for example `target: null`).
 
 | Field | Type | Req | Rule |
 |---|---|---|---|
-| `rate` | string | yes | `combat` (2 Hz), `calm` (0.5 Hz), `docked` (0.1 Hz; also used while paused) |
+| `rate` | string | yes | `combat` (2 Hz), `calm` (0.5 Hz), `docked` (0.1 Hz), `paused` (the one snapshot sent when the tick stops; the next one follows the resume) |
 | `ship` | object, null ok | opt | player ship, below; `null` while dead or at the main menu |
 | `target` | object, null ok | opt | current target, below |
 | `threat` | object | opt | below |
@@ -161,7 +171,7 @@ A **coalesced full snapshot**: the DLL keeps only the latest unsent one. It is s
 
 `ship`: `hull` frac (req), `shield` frac (req), `shield_up` bool, `bots` count, `batts` count, `bots_max` count, `batts_max` count, `speed` number ≥ 0 (m/s), `mode` (req) one of `free`, `cruise`, `lane`, `docked`, `dead`, `menu`, `system` name (null ok), `base` name (null ok; set when docked), `near` name (null ok; nearest base or zone).
 
-`target`: `id` int ≥ 0 (req; the space object id), `name` name, `faction` name (null ok), `cls`, `hull` frac, `shield` frac, `dist` number ≥ 0 (m), `hostile` bool.
+`target`: `obj` int ≥ 0 (req; the space object id, the same name as in `ev.target`), `name` name, `faction` name (null ok), `cls`, `hull` frac, `shield` frac, `dist` number ≥ 0 (m), `hostile` bool.
 
 `threat`: `hostiles` count (req; hostiles within the DLL's threat radius), `capital_hostile` bool, `incoming_missiles` int ≥ 0 (null ok, if obtainable).
 
@@ -247,13 +257,17 @@ A save was loaded. `save` name (req); `char` name (null ok; lets the sidecar key
 
 The game was saved. `save` name (req).
 
+#### `ev.menu`
+
+Returned to the main menu: no ship, no game loaded (§4.8). No fields. A `state` with `ship: null` follows.
+
 #### `ev.pause`
 
-`paused` bool (req).
+The game tick stopped or resumed (§4.7). `on` bool (req): `true` = stopped (F1 pause, unfocused pause, loading screen), `false` = running again. The sidecar suspends its ack timeouts while `on` is true.
 
 #### `ptt`
 
-Push-to-talk edge from the DLL's key polling: `down` bool (req). The DLL polls `GetAsyncKeyState(ptt_vk)` each tick only while the Freelancer window is in the foreground and chat is closed, and sends `ptt{down:true}` on press and `ptt{down:false}` on release. Default key: numpad period, **VK_DECIMAL = 110** (DESIGN D-11.3). `ptt_key = numpad_minus` (VK 109) requires the keymap patch that removes vanilla `USER_ZOOM_IN`. The sidecar never reads keys itself. On `down` it starts keeping mic audio (with a 300 ms pre-roll); on `up` it adds a 150 ms tail and hands the clip to speech-to-text.
+Push-to-talk edge from the DLL's key polling: `down` bool (req); `reason` (opt, only with `down:false`) one of `focus_lost`, `pause`, `menu`, `chat`, `disconnect`. The DLL polls `GetAsyncKeyState(ptt_vk)` each tick only while the Freelancer window is in the foreground and chat is closed, and sends `ptt{down:true}` on press and `ptt{down:false}` on release. **Whenever polling stops while the key is held**, it sends `ptt{down:false, reason:…}` at once: that is a *cancel*, and the sidecar discards the utterance (§4.7). A `down:true` while already down, or a `down:false` while not down, is ignored. Default key: numpad period, **VK_DECIMAL = 110** (DESIGN D-11.3). `ptt_key = numpad_minus` (VK 109) requires the keymap patch that removes vanilla `USER_ZOOM_IN`. The sidecar never reads keys itself. On `down` it starts keeping mic audio (with a 300 ms pre-roll); on `up` it adds a 150 ms tail and hands the clip to speech-to-text.
 
 ### 7.3 Acks
 
@@ -269,11 +283,11 @@ The DLL's answer to every command, by `id`, at most once per command.
 | `err` | string | if `ok` is false | `unknown_type`, `unknown_field`, `bad_value`, `rate_limited`, `unsupported`, `not_now`, `internal` |
 | `detail` | string ≤ 256 | opt | human-readable |
 
-The sidecar treats a command with no ack within **5 s** as lost (logged; it is not re-sent automatically).
+**Deferred and late acks.** A command received while the tick is stopped is acked when it is applied after the resume (§4.7). The sidecar's ack timeout is **5 s**, suspended while paused. When it expires, the sidecar reports the command as overdue to whoever sent it, but **keeps it pending (marked late) until the session ends**. If its ack still arrives, the sidecar reconciles its world model from that ack's `applied` instead of dropping it. Commands are never re-sent automatically. At session end every unacked command counts as lost (the DLL drops unapplied commands on disconnect, §4.5).
 
 ## 8. Sidecar → game commands
 
-Every command carries an `id` and gets exactly one `ack`. A rejected command changes nothing (atomic). Reserved commands may be answered `err:"unsupported"` until their wave lands.
+Every command carries an `id` and gets exactly one `ack`. A rejected command changes nothing (atomic). Reserved commands may be answered `err:"unsupported"` until their wave lands. A command that arrives while the game tick is stopped is queued and acked when applied (§4.7).
 
 #### `policy.set`
 
@@ -319,9 +333,9 @@ Enforced by the DLL (W2-REFLEX); the sidecar also validates its own commands bef
 - **Ranges:** numeric policy values outside their range are **clamped**, not rejected; the ack's `applied` shows the clamped value.
   - `0.05 ≤ *_below ≤ 0.95` (`bots_hull_below`, `batts_shield_below`, `retreat_hull_below`);
   - reserves in `[0, max stock]`;
-  - `critical_hull` in `[critical_hull_floor, 0.95]`; it is a hard floor the LLM cannot lower or disable.
-- **Rate limits** (guards against an LLM loop): at most **10 commands per second** and at most **2 policy changes per second** (`policy.set` + `wing.policy`), sliding 1 s windows. Excess commands are answered `err:"rate_limited"` and dropped, never queued.
-- **Timing:** accepted commands apply on the next game tick, on the game's main thread.
+  - `critical_hull` in `[critical_hull_floor, min(bots_hull_below, 0.95)]`, re-clamped whenever either changes; it is a hard floor the LLM cannot lower or disable, and it never exceeds the normal nanobot threshold.
+- **Rate limits** (guards against an LLM loop): at most **10 commands per second** and at most **2 policy changes per second** (`policy.set` + `wing.policy`), sliding 1 s windows, counted when a command arrives. Excess commands are answered `err:"rate_limited"` and dropped. (Only the stopped-tick queue of §4.7 holds commands, and only those within the limits.)
+- **Timing:** accepted commands apply on the next game tick, on the game's main thread; while the tick is stopped they wait in the §4.7 queue.
 
 ## 10. Extension rules
 
@@ -336,6 +350,10 @@ Enforced by the DLL (W2-REFLEX); the sidecar also validates its own commands bef
 
 From R6 §2.3; these are requirements on the DLL side.
 
+- **MUST: the IPC worker thread owns the connection.** Connect, `hello`, receiving `welcome`/`bye`, answering `ping` with `pong`, sending its own pings and detecting missed pongs all happen on the worker, never on the game tick. The worker keeps doing this while the tick is stopped (§4.7), so a pause never looks like a dead peer to either side.
+- **MUST: release push-to-talk when polling stops.** The game thread tracks whether the PTT key is down. On focus loss, pause, menu, chat or a deliberate disconnect it posts `ptt{down:false, reason:…}` before it stops polling.
+- **MUST: the stopped-tick protocol** of §4.7: `ev.pause{on}` plus one `state` on each edge; queue incoming commands (at most 64) and ack them when applied; no `state` stream while stopped.
+- **MUST: drop unapplied commands on disconnect** (§4.5) and never ack a command from an earlier connection.
 - **Never touch a socket on the game thread.** Every Winsock `recv`/`send` under Wine is a wineserver round trip (`dlls/ntdll/unix/socket.c`: `sock_recv` issues `SERVER_START_REQ(recv_socket)` before reading; `sock_send` likewise; VERIFIED from source, R6 §2.1). Run a dedicated IPC worker thread that `select()`s with a ≈ 50 ms timeout; never spin on `recv`.
 - **Game thread ↔ worker:** the game thread only locks a mutex and pushes to or swaps a deque. No Winsock calls, no waits, no condition-variable blocking on the game thread. Commands are parsed and validated into POD structs on the worker and applied by the game thread on its next tick.
 - **Outbox:** bounded (for example 256 lines). When full, drop the oldest state snapshot first and never drop an ack. Snapshots are coalesced (`PostLatest`: only the newest unsent one is kept). While disconnected, posting is a no-op (keep at most the last snapshot), so nothing piles up while the sidecar is absent.
@@ -349,14 +367,15 @@ From R6 §2.3; these are requirements on the DLL side.
 
 - `asyncio.start_server(host="127.0.0.1", family=AF_INET, limit=65535)`; lines are read with `StreamReader.readuntil(b"\n")`. `readline()` is not used because on overrun it silently clears its buffer, so the rest of an oversize line would then be parsed as a new message; `readuntil` leaves the data in place and the server discards the whole line explicitly.
 - Handlers are registered with `HandlerRegistry.register_handler(t, fn)` (exact type, `prefix.*`, or `*`) and `on_session_start` / `on_session_end`. Later waves add features this way without editing the server.
-- Profiles (CONVENTIONS §13): `--profile live` for play; `--profile test` for every harness, lane, soak and CI use (null audio sink, fake transcriber/TTS/brain, `--mic-file`).
+- Profiles (CONVENTIONS §13): `--profile live` for play; `--profile test` for every harness, lane, soak and CI use (null audio sink, fake transcriber/TTS/brain, `--mic-file`). The test profile refuses the play port 29170 unless explicitly forced.
+- `Session.send_command(t, on_late=None, **fields)` returns a future: the ack, or `None` when it is overdue or the session ends. A late ack goes to `on_late(ack)` and to `Session.reconciled`. `ev.pause` toggles `Session.paused`, which suspends the ack timers.
 
 ## 13. Example session
 
 ```
 DLL → {"v":1,"t":"hello","seq":1,"gt":0,"dll":"0.1.0","game":"FLHD","char":"Test Pilot","save":"slot1","policy":{"player":{"auto_bots":true,"bots_hull_below":0.5,"bots_reserve":0,"critical_hull":0.25,"release_reserve_when":"never","auto_batts":true,"batts_shield_below":0.25,"batts_reserve":0}},"features":["reflex"],"ptt_vk":110}
-SC  → {"v":1,"t":"welcome","seq":1,"sidecar":"0.1.0","features":["stt","tts"],"heartbeat_ms":2000,"profile":"live"}
-DLL → {"v":1,"t":"state","seq":2,"gt":81234,"rate":"combat","ship":{"hull":0.82,"shield":0.1,"shield_up":true,"bots":7,"batts":4,"mode":"free","system":"test_system"},"target":{"id":40213,"name":"Bandit","faction":"test_faction","cls":"fighter","hull":0.6,"shield":0.0,"dist":850,"hostile":true},"threat":{"hostiles":3,"capital_hostile":false},"ui":{"paused":false,"menu_open":false,"focused":true,"chat_typing":false}}
+SC  → {"v":1,"t":"welcome","seq":1,"sidecar":"0.1.0","features":["stt","tts"],"heartbeat_ms":2000,"profile":"live","ptt_vk":110}
+DLL → {"v":1,"t":"state","seq":2,"gt":81234,"rate":"combat","ship":{"hull":0.82,"shield":0.1,"shield_up":true,"bots":7,"batts":4,"mode":"free","system":"test_system"},"target":{"obj":40213,"name":"Bandit","faction":"test_faction","cls":"fighter","hull":0.6,"shield":0.0,"dist":850,"hostile":true},"threat":{"hostiles":3,"capital_hostile":false},"ui":{"paused":false,"menu_open":false,"focused":true,"chat_typing":false}}
 DLL → {"v":1,"t":"ptt","seq":3,"gt":82000,"down":true}
 DLL → {"v":1,"t":"ptt","seq":4,"gt":83400,"down":false}
 SC  → {"v":1,"t":"policy.set","seq":2,"id":"c-1","scope":"player","bots_reserve":7,"release_reserve_when":"capital_hostile_present"}
@@ -365,6 +384,14 @@ SC  → {"v":1,"t":"say","seq":3,"id":"c-2","speaker":"copilot","text":"Copy. Ho
 DLL → {"v":1,"t":"ack","seq":6,"gt":84000,"id":"c-2","ok":true,"applied":{"shown":true}}
 SC  → {"v":1,"t":"ping","seq":4,"n":1}
 DLL → {"v":1,"t":"pong","seq":7,"gt":84100,"n":1}
+DLL → {"v":1,"t":"ev.pause","seq":8,"gt":90000,"on":true}                       (F1 pressed)
+DLL → {"v":1,"t":"state","seq":9,"gt":90000,"rate":"paused","ship":{"hull":0.82,"shield":0.4,"mode":"free"}}
+SC  → {"v":1,"t":"act","seq":5,"id":"c-3","do":"use_bots"}                     (queued by the DLL)
+SC  → {"v":1,"t":"ping","seq":6,"n":2}
+DLL → {"v":1,"t":"pong","seq":10,"gt":90000,"n":2}                              (worker answers while paused)
+DLL → {"v":1,"t":"ev.pause","seq":11,"gt":90000,"on":false}                     (40 s later: resumed)
+DLL → {"v":1,"t":"ack","seq":12,"gt":90016,"id":"c-3","ok":true,"applied":{"do":"use_bots","left":6}}
+DLL → {"v":1,"t":"state","seq":13,"gt":90016,"rate":"combat","ship":{"hull":0.97,"shield":0.4,"bots":6,"mode":"free"}}
 ```
 
 ## 14. Change log
@@ -376,3 +403,4 @@ DLL → {"v":1,"t":"pong","seq":7,"gt":84100,"n":1}
   - top-level `id` is reserved for command ids, so `ev.target.id` became `obj`, `ev.wing.id` became `wing` and `ev.carrier.id` became `carrier`;
   - added: `bye.supported`, `hello.features`, `hello.ptt_vk`, `ev.load.char`, `ev.system.from`, `welcome.profile`, `welcome.heartbeat_ms`, and the optional `scope`/`carrier` on `act`;
   - `say` is a command with an `id` and an ack, like every other sidecar → game message.
+- **v1, review round 1 (2026-10-18), before freeze:** the stopped-tick lifecycle (§4.7: worker owns the heartbeat; `ev.pause{on}` replaces `ev.pause{paused}`; one `state` per pause edge with the new `rate:"paused"`; queued commands with deferred acks; late-ack reconciliation; ack timeouts suspended while paused); `ptt.reason` cancels; `ev.menu`; single-player only; `hello` once per connection; DLL drops unapplied commands on disconnect; per-process command ids; `critical_hull` capped at `bots_hull_below`; `welcome.ptt_vk` and the deploy-time source of truth for the key; duplicate keys invalid; `state.target.id` became `obj`.

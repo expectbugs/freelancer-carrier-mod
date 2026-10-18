@@ -111,17 +111,74 @@ def test_callback_path_and_status_counting():
         cap.close()
 
 
-def test_max_utterance_caps_memory():
-    cap = PttCapture(max_utterance_s=0.1, tail_ms=0)  # 1600 samples max
+def test_max_utterance_discards_and_next_press_starts_clean():
+    cap = PttCapture(max_utterance_s=0.1, tail_ms=0, preroll_ms=0)  # 1600 samples max
 
     async def body():
         cap.ptt_down()
-        for blk in ramp_blocks(0, 50):
+        for blk in ramp_blocks(0, 50):   # held far past the cap (a lost release)
             cap.feed(blk)
-        return await cap.ptt_up()
+        stale = await cap.ptt_up()        # the over-long press is gone, not transcribed
+        cap.ptt_down()                    # the next press is not mistaken for a duplicate
+        for blk in ramp_blocks(100_000, 3):
+            cap.feed(blk)
+        return stale, await cap.ptt_up()
+
+    stale, fresh = run(body())
+    assert stale is None and cap.discarded == 1
+    assert fresh is not None and len(fresh) == 3 * BLOCK and fresh[0] == 100_000
+
+
+def test_cap_reached_during_tail_delivers_clip():
+    cap = PttCapture(max_utterance_s=0.1, tail_ms=150, preroll_ms=0)
+
+    async def body():
+        cap.ptt_down()
+        for blk in ramp_blocks(0, 4):     # 1280 samples, under the cap
+            cap.feed(blk)
+        up = asyncio.ensure_future(cap.ptt_up())
+        await asyncio.sleep(0)
+        for blk in ramp_blocks(4 * BLOCK, 4):  # the tail crosses the cap
+            cap.feed(blk)
+        return await asyncio.wait_for(up, 1.0)
 
     clip = run(body())
-    assert len(clip) <= 1600 + BLOCK
+    assert clip is not None and 1600 <= len(clip) <= 1600 + BLOCK
+
+
+def test_cancel_and_reset():
+    cap = PttCapture(preroll_ms=300)
+
+    async def body():
+        for blk in ramp_blocks(0, 20):
+            cap.feed(blk)
+        cap.ptt_down()
+        for blk in ramp_blocks(20 * BLOCK, 5):
+            cap.feed(blk)
+        cap.cancel()                       # ptt{down:false, reason:"focus_lost"}
+        after_cancel = await cap.ptt_up()
+        cap.reset()                        # new session: no pre-roll from the old one either
+        cap.ptt_down()
+        cap.feed(np.full(BLOCK, -1.0, dtype=np.float32))
+        return after_cancel, await cap.ptt_up()
+
+    after_cancel, clip = run(body())
+    assert after_cancel is None and cap.discarded == 1
+    assert len(clip) == BLOCK and set(np.unique(clip)) == {-1.0}
+
+
+def test_cancel_resolves_a_pending_tail():
+    cap = PttCapture(tail_ms=150)
+
+    async def body():
+        cap.ptt_down()
+        cap.feed(np.ones(BLOCK, dtype=np.float32))
+        up = asyncio.ensure_future(cap.ptt_up())
+        await asyncio.sleep(0)
+        cap.cancel()
+        return await asyncio.wait_for(up, 1.0)
+
+    assert run(body()) is None
 
 
 def test_close_while_recording_discards():

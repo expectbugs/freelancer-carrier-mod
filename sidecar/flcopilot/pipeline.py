@@ -23,6 +23,7 @@ class VoicePipeline:
         self._tasks: dict[asyncio.Task, object] = {}  # utterance task -> its session
         self._session = None  # the session that owns the mic
         self.utterances = 0
+        self.cancelled = 0
         self.last_timing: dict = {}
 
     def install(self, registry) -> None:
@@ -34,6 +35,7 @@ class VoicePipeline:
     def on_session_start(self, session) -> None:
         self._session = session
         try:
+            self.profile.mic.reset()  # no recording state survives into a new session
             self.profile.mic.open()  # idempotent
         except Exception as exc:
             log.warning("mic open failed; voice input disabled", extra={"kv": {"err": repr(exc)[:200]}})
@@ -48,6 +50,7 @@ class VoicePipeline:
             return
         self._session = None
         try:
+            self.profile.mic.cancel()  # a press held across the disconnect is cancelled (ipc.md §4.7)
             self.profile.mic.close()
         except Exception as exc:
             log.warning("mic close failed", extra={"kv": {"err": repr(exc)[:200]}})
@@ -57,6 +60,12 @@ class VoicePipeline:
         if msg["down"]:
             self.profile.mic.ptt_down()
             log.info("ptt down", extra={"kv": {"sid": session.sid}})
+            return
+        if "reason" in msg:
+            # Polling stopped with the key held (focus lost, pause, menu, chat): a cancel, not an order.
+            self.profile.mic.cancel()
+            self.cancelled += 1
+            log.info("ptt cancelled", extra={"kv": {"sid": session.sid, "reason": msg["reason"]}})
             return
         log.info("ptt up", extra={"kv": {"sid": session.sid}})
         task = asyncio.ensure_future(self._utterance(session, time.perf_counter()))
@@ -84,7 +93,8 @@ class VoicePipeline:
             if p.brain is None:
                 log.info("no brain in this profile yet; utterance not acted on")
                 return
-            reply = p.brain.respond(text, session.last_state)
+            # In a thread: a real brain (W4, Claude CLI) takes seconds and must not stall pings or I/O.
+            reply = await asyncio.to_thread(p.brain.respond, text, session.last_state)
             futures = []
             for cmd in reply.commands:
                 futures.append(await session.send_command(cmd.t, **cmd.fields))

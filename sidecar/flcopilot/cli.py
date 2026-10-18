@@ -12,7 +12,7 @@ import sys
 import time
 
 from . import __version__, config, logsetup, protocol
-from .profiles import PROFILES, ProfileError
+from .profiles import PROFILES, ProfileError, check_port
 
 log = logsetup.get("main")
 
@@ -32,7 +32,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--mic-file", help="test profile: WAV used as the microphone")
     ap.add_argument("--null-wav-dir", help="test profile: write null-sink audio here as WAVs")
     ap.add_argument("--selftest", action="store_true",
-                    help="start the server (test profile), run the fake client handshake, shut down")
+                    help="start the server (test profile) on an ephemeral port unless --port is given, "
+                         "run the fake client handshake, shut down")
+    ap.add_argument("--allow-play-port", action="store_true",
+                    help="let the test profile (or --selftest) bind the play port 29170")
     ap.add_argument("--discover-mic", action="store_true", help="resolve mic_match to a capture source and exit")
     ap.add_argument("--print-config", action="store_true", help="print the effective config and exit")
     ap.add_argument("--version", action="version", version=f"flcopilot {__version__} (protocol v{protocol.PROTOCOL_VERSION})")
@@ -75,8 +78,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.discover_mic:
             return discover_mic(cfg)
         if args.selftest:
+            if args.port is None:
+                cfg.set("server.port", 0)  # ephemeral: never collide with a lane or the play install
+            check_port("test", cfg.get("server.port"), args.allow_play_port)
             return asyncio.run(selftest(cfg, log_path))
         profile = cfg.get("profile.default")
+        check_port(profile, cfg.get("server.port"), args.allow_play_port)
         return asyncio.run(serve(cfg, profile, args.mic_file, args.null_wav_dir))
     except ProfileError as exc:
         log.error(f"profile error: {exc}")

@@ -7,6 +7,11 @@
   connection.
 - Heartbeat: ``ping`` every ``heartbeat_s``; after ``missed_pongs`` unanswered pings the
   session is closed with ``bye{reason:"timeout"}``.
+- Commands get ids from a per-process counter. An ack overdue by ``ack_timeout_s`` resolves the
+  command's future to ``None`` and marks it late; a late ack still arrives and is reconciled
+  (``on_late`` callback, ``Session.reconciled``) until the session ends. While the game reports
+  ``ev.pause{on:true}`` (tick stopped) the ack timeouts are suspended.
+- A peer that stops reading is aborted (``send_timeout``), never left half-closed.
 - Everything else goes through the :class:`~flcopilot.registry.HandlerRegistry`.
 """
 from __future__ import annotations
@@ -23,11 +28,27 @@ from typing import Any
 from . import __version__, logsetup, protocol
 from .protocol import ProtocolError
 from .registry import HandlerRegistry
+from .registry import _call as call_handler
 
 log = logsetup.get("server")
 
 MAX_PENDING_CONNECTIONS = 4
 SEND_TIMEOUT_S = 2.0
+CLOSE_FLUSH_S = 2.0
+
+#: Command ids are unique per process, so a stale ack from an earlier connection can never
+#: resolve a command of a later one (ipc.md §3, §7.3).
+_COMMAND_IDS = itertools.count(1)
+
+
+@dataclass
+class Pending:
+    t: str
+    fut: asyncio.Future
+    sent_at: float
+    timer: asyncio.TimerHandle | None = None
+    late: bool = False
+    on_late: Any = None
 
 
 @dataclass
@@ -49,6 +70,8 @@ class Stats:
     refused: int = 0
     acks: int = 0
     ack_timeouts: int = 0
+    late_acks: int = 0
+    send_timeouts: int = 0
     handler_errors: int = 0
     by_type: dict = field(default_factory=dict)
 
@@ -84,8 +107,10 @@ class Session:
         self._send_lock = asyncio.Lock()
         self._heartbeat: asyncio.Task | None = None
         self._handshake_timer: asyncio.TimerHandle | None = None
-        self._cmd_ids = itertools.count(1)
-        self.pending: dict[str, tuple[str, asyncio.Future, asyncio.TimerHandle]] = {}
+        self.pending: dict[str, Pending] = {}
+        self.reconciled: list[dict] = []  # late acks that arrived after their timeout
+        self.paused = False  # ev.pause{on}: the game tick is stopped
+        self._flush_timer: asyncio.TimerHandle | None = None
         self.done = asyncio.Event()
         self.data: dict[str, Any] = {}  # scratch space for features (keyed by feature name)
 
@@ -99,50 +124,106 @@ class Session:
             msg = {"v": protocol.PROTOCOL_VERSION, "t": t, "seq": self.seq_out, **fields}
             data = protocol.encode(msg)
             self.writer.write(data)
-            await asyncio.wait_for(self.writer.drain(), SEND_TIMEOUT_S)
+            try:
+                await asyncio.wait_for(self.writer.drain(), SEND_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                self.server.stats.send_timeouts += 1
+                self.close_reason = self.close_reason or "send_timeout"
+                log.warning("peer is not reading; aborting", extra={"kv": {"sid": self.sid, "t": t}})
+                self._abort()
+                raise ConnectionError("send timeout: peer not reading") from None
             self.server.stats.lines_out += 1
         lvl = 10 if t in ("ping", "pong") else 20
         log.log(lvl, "sent", extra={"kv": {"sid": self.sid, "t": t, "seq": msg["seq"],
                                            **({"id": fields["id"]} if "id" in fields else {})}})
         return msg
 
-    async def send_command(self, t: str, **fields: Any) -> asyncio.Future:
-        """Send a command with a fresh id. The returned future resolves to the ack dict,
-        or to ``None`` on ack timeout or disconnect. Invalid commands raise ProtocolError
-        (that is a sidecar bug, never sent)."""
+    async def send_command(self, t: str, on_late=None, **fields: Any) -> asyncio.Future:
+        """Send a command with a fresh id. The returned future resolves to the ack dict, or to
+        ``None`` when the ack is overdue (``ack_timeout_s``, suspended while paused) or the session
+        ends. An overdue command stays pending as *late*: if its ack still arrives, it is appended
+        to ``reconciled`` and passed to ``on_late(ack)`` (sync or async). Invalid commands raise
+        ProtocolError (a sidecar bug; never sent)."""
         spec = protocol.MESSAGES.get(t)
         if spec is None or spec.kind != protocol.COMMAND:
             raise ProtocolError("not_a_command", t)
-        cid = f"c-{next(self._cmd_ids)}"
+        cid = f"c-{next(_COMMAND_IDS)}"
         probe = {"v": protocol.PROTOCOL_VERSION, "t": t, "seq": 0, "id": cid, **fields}
         errors = protocol.validate(probe)
         if errors:
             raise ProtocolError("invalid_command", "; ".join(errors))
         loop = asyncio.get_running_loop()
-        fut: asyncio.Future = loop.create_future()
-        timer = loop.call_later(self.server.ack_timeout_s, self._ack_timeout, cid)
-        self.pending[cid] = (t, fut, timer)
+        pend = Pending(t=t, fut=loop.create_future(), sent_at=time.monotonic(), on_late=on_late)
+        self.pending[cid] = pend
+        if not self.paused:
+            self._arm(cid)
         try:
             await self.send(t, id=cid, **fields)
         except Exception:
-            self._resolve(cid, None)
+            self._finish(cid, None)
             raise
-        return fut
+        return pend.fut  # may already be resolved: the ack can arrive while send() awaits drain
 
-    def _resolve(self, cid: str, ack: dict | None) -> None:
-        entry = self.pending.pop(cid, None)
-        if entry is None:
+    def _arm(self, cid: str) -> None:
+        p = self.pending.get(cid)
+        if p is None or p.late:
             return
-        _, fut, timer = entry
-        timer.cancel()
-        if not fut.done():
-            fut.set_result(ack)
+        if p.timer is not None:
+            p.timer.cancel()
+        p.timer = asyncio.get_running_loop().call_later(self.server.ack_timeout_s, self._ack_timeout, cid)
+
+    def _finish(self, cid: str, ack: dict | None) -> Pending | None:
+        p = self.pending.pop(cid, None)
+        if p is None:
+            return None
+        if p.timer is not None:
+            p.timer.cancel()
+        if not p.fut.done():
+            p.fut.set_result(ack)
+        return p
 
     def _ack_timeout(self, cid: str) -> None:
-        if cid in self.pending:
-            self.server.stats.ack_timeouts += 1
-            log.warning("ack timeout", extra={"kv": {"sid": self.sid, "id": cid, "t": self.pending[cid][0]}})
-            self._resolve(cid, None)
+        p = self.pending.get(cid)
+        if p is None or p.late:
+            return
+        p.timer = None
+        if self.paused:
+            return  # re-armed on resume
+        self.server.stats.ack_timeouts += 1
+        p.late = True
+        log.warning("ack overdue; command marked late", extra={"kv": {"sid": self.sid, "id": cid, "t": p.t}})
+        if not p.fut.done():
+            p.fut.set_result(None)
+
+    def set_paused(self, on: bool) -> None:
+        """ev.pause: the game tick stopped (on) or resumed. Ack timeouts are suspended while paused
+        and restart in full on resume, because the DLL applies (and acks) commands on its tick."""
+        if on == self.paused:
+            return
+        self.paused = on
+        for cid, p in self.pending.items():
+            if p.late:
+                continue
+            if on and p.timer is not None:
+                p.timer.cancel()
+                p.timer = None
+            elif not on:
+                self._arm(cid)
+        log.info("game paused; ack timeouts suspended" if on else "game resumed; ack timeouts restarted",
+                 extra={"kv": {"sid": self.sid, "pending": len(self.pending)}})
+
+    def _abort(self) -> None:
+        self.closing = True
+        try:
+            self.writer.transport.abort()
+        except Exception:
+            pass
+
+    def _abort_if_open(self) -> None:
+        if not self.done.is_set():
+            log.warning("close did not flush in time; aborting", extra={"kv": {"sid": self.sid}})
+            self.close_reason = self.close_reason or "send_timeout"
+            self._abort()
 
     # ---- lifecycle ---------------------------------------------------------------------
     async def close(self, reason: str | None = None, detail: str = "", send_bye: bool = True,
@@ -171,6 +252,8 @@ class Session:
             self.writer.close()
         except Exception:
             pass
+        # close() flushes first; a peer that never reads would keep it half-open forever.
+        self._flush_timer = asyncio.get_running_loop().call_later(CLOSE_FLUSH_S, self._abort_if_open)
 
     async def run(self) -> None:
         loop = asyncio.get_running_loop()
@@ -202,12 +285,14 @@ class Session:
         if self._heartbeat and self._heartbeat is not asyncio.current_task():
             self._heartbeat.cancel()
         for cid in list(self.pending):
-            self._resolve(cid, None)
+            self._finish(cid, None)  # the DLL drops unapplied commands on disconnect (ipc.md §4)
         try:
             self.writer.close()
             await asyncio.wait_for(self.writer.wait_closed(), 1.0)
         except Exception:
-            pass
+            self._abort()
+        if self._flush_timer is not None:
+            self._flush_timer.cancel()
         if self.started:
             await self.server.registry.session_ended(self)
         self.server._session_finished(self)
@@ -344,12 +429,24 @@ class Session:
         elif t == "ack":
             stats.acks += 1
             cid = msg["id"]
-            if cid in self.pending:
+            p = self.pending.get(cid)
+            if p is None:
+                log.warning("ack for an unknown id", extra={"kv": {"sid": self.sid, "id": cid}})
+            elif p.late:
+                self._finish(cid, msg)
+                stats.late_acks += 1
+                self.reconciled.append(msg)
+                log.info("late ack reconciled", extra={"kv": {
+                    "sid": self.sid, "id": cid, "t": p.t, "ok": msg["ok"],
+                    "late_s": round(time.monotonic() - p.sent_at, 3)}})
+                if p.on_late is not None:
+                    await call_handler(p.on_late, msg)
+            else:
                 log.info("ack", extra={"kv": {"sid": self.sid, "id": cid, "ok": msg["ok"],
                                               **({"err": msg["err"]} if "err" in msg else {})}})
-                self._resolve(cid, msg)
-            else:
-                log.warning("ack for unknown or expired id", extra={"kv": {"sid": self.sid, "id": cid}})
+                self._finish(cid, msg)
+        elif t == "ev.pause":
+            self.set_paused(bool(msg["on"]))
         elif t == "state":
             self.last_state = msg
         await registry.dispatch(self, msg)
@@ -378,7 +475,8 @@ class Session:
                                         "repeat": not first}})
         # welcome goes out before this session becomes active, so no command can precede it.
         await self.send("welcome", sidecar=__version__, features=list(self.server.features),
-                        heartbeat_ms=int(round(self.server.heartbeat_s * 1000)), profile=self.server.profile_name)
+                        heartbeat_ms=int(round(self.server.heartbeat_s * 1000)), profile=self.server.profile_name,
+                        **({"ptt_vk": self.server.ptt_vk} if self.server.ptt_vk is not None else {}))
         self.handshaken = True
         if first:
             self.server._activate(self)

@@ -9,6 +9,9 @@
 4. Reports stt_ms (warm), tts_first_audio_ms (warm), load times, the device actually used,
    and nvidia-smi evidence that this process held GPU memory (or the CPU fallback reason).
 
+Results: "ok" (exit 0); "ok-cpu-fallback" (CUDA was asked for but Whisper fell back to CPU int8;
+exit 0, or exit 1 with --require-cuda, where no fallback is even attempted); "fail" (exit 1).
+
 No audio is played: sounddevice is never imported. Models load with local_files_only=True and
 HF_HUB_OFFLINE=1, so nothing is downloaded. Output goes to $FLMOD_TESTRUNS/<UTC>-voice-smoke/.
 Exit code 0 = pass.
@@ -80,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--compute-type", default=None, help="default float16 on cuda, int8 on cpu")
     ap.add_argument("--warm-runs", type=int, default=5)
+    ap.add_argument("--require-cuda", action="store_true",
+                    help="fail (exit 1) unless Whisper runs on CUDA; no CPU fallback is attempted")
     args = ap.parse_args(argv)
 
     models = Path(os.environ.get("FLMOD_MODELS") or "")
@@ -92,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
                 "interfaces": interfaces()},
     }
     ok = True
+    fallback = False
     try:
         # ---- TTS ------------------------------------------------------------------------
         import numpy as np
@@ -128,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
             if not HF_REPO_DIR.exists():
                 raise FileNotFoundError(f"HF cache entry missing: {HF_REPO_DIR}")
         compute = args.compute_type or ("float16" if args.device == "cuda" else "int8")
-        stt = WhisperEngine(model_path, device=args.device, compute_type=compute, beam_size=1)
+        stt = WhisperEngine(model_path, device=args.device, compute_type=compute, beam_size=1,
+                            cpu_fallback=not args.require_cuda)
         gpu_before = gpu_snapshot()
         stt.load()
         gpu_loaded = gpu_snapshot()
@@ -167,15 +174,23 @@ def main(argv: list[str] | None = None) -> int:
             ok = False
         if args.device == "cuda" and stt.device != "cuda":
             report["note"] = f"CPU fallback: {stt.fallback_reason}"
+            fallback = True
     except Exception as exc:
         ok = False
         report["error"] = f"{type(exc).__name__}: {exc}"[:500]
 
-    report["result"] = "pass" if ok else "fail"
+    if ok and fallback:
+        result = "ok-cpu-fallback"
+        ok = not args.require_cuda
+    else:
+        result = "ok" if ok else "fail"
+    if args.require_cuda and "error" in report:
+        report["note"] = "CUDA required: " + report["error"]
+    report["result"] = result
     (out / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
     s, t, g = report.get("stt", {}), report.get("tts", {}), report.get("gpu", {})
-    print(f"VOICE_SMOKE {'ok' if ok else 'FAIL'} transcript={s.get('transcript')!r} stt_ms={s.get('stt_ms')} "
+    print(f"VOICE_SMOKE {result if ok else 'FAIL(' + result + ')'} transcript={s.get('transcript')!r} stt_ms={s.get('stt_ms')} "
           f"tts_first_audio_ms={t.get('tts_first_audio_ms')} device={s.get('device')}/{s.get('compute_type')} "
           f"this_pid_gpu_mib={g.get('after_load', {}).get('this_pid_mib')} out={out}", flush=True)
     return 0 if ok else 1

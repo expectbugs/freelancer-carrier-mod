@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import logsetup
+from . import logsetup, protocol
 from .audio.capture import Mic, NullMic
 from .audio.sinks import AudioSink, DeviceSink, NullSink
 from .brain import Brain, FakeBrain
@@ -43,6 +43,17 @@ class Profile:
     speed: float = 1.0
     mic_discovery: Any = None
     notes: list = field(default_factory=list)
+
+
+def check_port(profile: str, port: int, allow_play_port: bool = False, env: dict | None = None) -> None:
+    """The test profile must not take the play port 29170: a fake brain there would feed canned
+    policy.set commands into Adam's real game. Forced only by --allow-play-port or
+    FLCOPILOT_ALLOW_PLAY_PORT=1."""
+    env = os.environ if env is None else env
+    forced = allow_play_port or env.get("FLCOPILOT_ALLOW_PLAY_PORT", "") not in ("", "0")
+    if profile == "test" and port == protocol.DEFAULT_PORT and not forced:
+        raise ProfileError(f"test profile refuses the play port {protocol.DEFAULT_PORT}; use a lane port "
+                           f"(29170 + N), --port 0, or --allow-play-port")
 
 
 def guard_live(env: dict | None = None) -> None:

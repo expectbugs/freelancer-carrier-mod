@@ -45,7 +45,7 @@ SHIP_CLASSES = (
     "fighter", "freighter", "gunboat", "cruiser", "battleship", "carrier", "transport", "station", "other",
 )
 SHIP_MODES = ("free", "cruise", "lane", "docked", "dead", "menu")
-RATE_TIERS = ("combat", "calm", "docked")
+RATE_TIERS = ("combat", "calm", "docked", "paused")
 POLICY_SCOPES = ("player", "carrier")
 RELEASE_RESERVE_WHEN = ("never", "capital_hostile_present", "target_is_capital")
 ACT_DO = ("use_bots", "use_batts")
@@ -54,6 +54,7 @@ WING_ORDERS = ("follow", "engage", "hold", "retreat", "guard_carrier", "regroup"
 WING_STATES = ("follow", "engage", "retreat", "guard", "docked")
 WING_WHAT = ("down", "damaged", "retreating", "rejoined")
 BYE_REASONS = ("version", "replaced", "shutdown", "timeout", "protocol")
+PTT_CANCEL_REASONS = ("focus_lost", "pause", "menu", "chat", "disconnect")
 ACK_ERRORS = (
     "unknown_type", "unknown_field", "bad_value", "rate_limited", "unsupported", "not_now", "internal",
 )
@@ -62,7 +63,7 @@ FEATURES = ("stt", "tts", "llm", "grammar")
 # Clamp bounds the DLL enforces (W2-REFLEX). Documented here so both sides agree.
 CLAMP_BELOW_MIN = 0.05
 CLAMP_BELOW_MAX = 0.95
-CRITICAL_HULL_FLOOR_DEFAULT = 0.25
+CRITICAL_HULL_FLOOR_DEFAULT = 0.25  # the DLL also caps critical_hull at bots_hull_below (ipc.md §5)
 RATE_LIMIT_COMMANDS_PER_S = 10
 RATE_LIMIT_POLICY_PER_S = 2
 
@@ -144,7 +145,8 @@ SHIP_SCHEMA = {
     "system": _name(nullable=True), "base": _name(nullable=True), "near": _name(nullable=True),
 }
 TARGET_SCHEMA = {
-    "id": F("int", required=True, min=0), "name": _name(), "faction": _name(nullable=True),
+    "obj": F("int", required=True, min=0, doc="space object id (same name as ev.target.obj)"),
+    "name": _name(), "faction": _name(nullable=True),
     "cls": F("str", enum=SHIP_CLASSES), "hull": _frac(), "shield": _frac(),
     "dist": F("num", min=0.0), "hostile": F("bool"),
 }
@@ -181,6 +183,7 @@ MESSAGES: dict[str, Msg] = {
         "features": F("list", required=True, items=F("str", enum=FEATURES), max_items=16),
         "heartbeat_ms": F("int", min=10, max=60000),
         "profile": F("str", enum=("live", "test")),
+        "ptt_vk": F("int", min=1, max=255, doc="the VK the sidecar's ptt_key maps to (the DLL logs a mismatch)"),
     }, doc="reply to a hello with a supported version"),
     "bye": Msg(BOTH, CONTROL, {
         "reason": F("str", required=True, enum=BYE_REASONS),
@@ -250,10 +253,15 @@ MESSAGES: dict[str, Msg] = {
         "detail": F("str", maxlen=256),
     }, reserved_for="W2-CARRIER-GAME"),
     "ev.death": Msg(G2S, EVENT, {"save": _name(nullable=True)}),
+    "ev.menu": Msg(G2S, EVENT, {}, doc="returned to the main menu (no ship, no game loaded)"),
     "ev.load": Msg(G2S, EVENT, {"save": _name(True), "char": _name(nullable=True)}),
     "ev.save": Msg(G2S, EVENT, {"save": _name(True)}),
-    "ev.pause": Msg(G2S, EVENT, {"paused": F("bool", required=True)}),
-    "ptt": Msg(G2S, EVENT, {"down": F("bool", required=True)}),
+    "ev.pause": Msg(G2S, EVENT, {"on": F("bool", required=True, doc="true = the game tick stopped")}),
+    "ptt": Msg(G2S, EVENT, {
+        "down": F("bool", required=True),
+        "reason": F("str", enum=PTT_CANCEL_REASONS,
+                    doc="only with down=false: polling stopped with the key held; the utterance is cancelled"),
+    }),
     # ---- game -> sidecar: acks -----------------------------------------------------------
     "ack": Msg(G2S, ACK, {
         "id": F("str", required=True, pattern=COMMAND_ID_RE),
@@ -405,6 +413,8 @@ def validate(msg: Any) -> list[str]:
         errors.append("policy.set: no policy field given")
     if msg["t"] in ("policy.set", "act") and "carrier" in msg and msg.get("scope", "player") != "carrier":
         errors.append("carrier: only allowed with scope=carrier")
+    if msg["t"] == "ptt" and "reason" in msg and msg.get("down") is not False:
+        errors.append("reason: only allowed with down=false")
     if msg["t"] == "ack":
         if msg.get("ok") is False and "err" not in msg:
             errors.append("err: missing (ok=false acks carry an err code)")
@@ -438,7 +448,8 @@ def decode(line: bytes) -> dict:
     except UnicodeDecodeError as exc:
         raise ProtocolError("utf8", str(exc)) from None
     try:
-        obj = json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float)
+        obj = json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float,
+                         object_pairs_hook=_no_duplicate_keys)
     except (ValueError, RecursionError) as exc:  # RecursionError: absurdly deep nesting
         raise ProtocolError("json", str(exc)[:200]) from None
     if "\\u" in text and _has_lone_surrogate(obj):
@@ -453,6 +464,16 @@ def decode(line: bytes) -> dict:
 
 def _reject_constant(name: str):
     raise ValueError(f"non-finite number {name} is not allowed")
+
+
+def _no_duplicate_keys(pairs: list) -> dict:
+    """Duplicate keys are invalid (parsers disagree on which one wins)."""
+    out: dict = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate key {key[:40]!r}")
+        out[key] = value
+    return out
 
 
 def _finite_float(text: str) -> float:

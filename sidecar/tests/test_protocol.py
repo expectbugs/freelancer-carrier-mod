@@ -19,14 +19,15 @@ POLICY = {"auto_bots": True, "bots_hull_below": 0.5, "bots_reserve": 0, "critica
 SAMPLES = {
     "hello": {"dll": "0.1.0", "game": "FLHD", "char": None, "save": None, "policy": {"player": POLICY},
               "features": ["reflex"], "ptt_vk": 110},
-    "welcome": {"sidecar": "0.1.0", "features": ["stt", "tts"], "heartbeat_ms": 2000, "profile": "live"},
+    "welcome": {"sidecar": "0.1.0", "features": ["stt", "tts"], "heartbeat_ms": 2000, "profile": "live",
+                "ptt_vk": 110},
     "bye": {"reason": "version", "supported": [1], "detail": "x"},
     "ping": {"n": 1},
     "pong": {"n": 1},
     "state": {"rate": "combat",
               "ship": {"hull": 0.8, "shield": 0.0, "shield_up": False, "bots": 3, "batts": 2, "mode": "free",
                        "system": "test_system", "base": None, "near": None, "speed": 80.5},
-              "target": {"id": 7, "name": "Bandit", "faction": None, "cls": "gunboat", "hull": 1.0,
+              "target": {"obj": 7, "name": "Bandit", "faction": None, "cls": "gunboat", "hull": 1.0,
                          "shield": 0.5, "dist": 900.0, "hostile": True},
               "threat": {"hostiles": 2, "capital_hostile": True, "incoming_missiles": None},
               "wing": [{"id": "w1", "name": "Wing One", "hull": 1.0, "state": "follow", "dist": 50}],
@@ -50,8 +51,9 @@ SAMPLES = {
     "ev.death": {"save": None},
     "ev.load": {"save": "slot1", "char": "Test Pilot"},
     "ev.save": {"save": "slot1"},
-    "ev.pause": {"paused": True},
-    "ptt": {"down": True},
+    "ev.menu": {},
+    "ev.pause": {"on": True},
+    "ptt": {"down": False, "reason": "focus_lost"},
     "ack": {"id": "c-1", "ok": True, "applied": dict(POLICY)},
     "policy.set": {"id": "c-2", "scope": "carrier", "carrier": "c1", "bots_reserve": 5,
                    "release_reserve_when": "capital_hostile_present"},
@@ -125,6 +127,10 @@ def test_carrier_states_match_conventions():
     ("ev.kill", {"victim": "x", "by": "enemy"}, "by"),
     ("ptt", {"down": 1}, "expected bool"),
     ("ptt", {}, "down: missing"),
+    ("ptt", {"down": True, "reason": "pause"}, "only allowed with down=false"),
+    ("ptt", {"down": False, "reason": "boredom"}, "reason"),
+    ("ev.pause", {"paused": True}, "on: missing"),
+    ("state", {"rate": "calm", "target": {"id": 7}}, "obj: missing"),
     ("ack", {"id": "c-1", "ok": False}, "err: missing"),
     ("ack", {"id": "c-1", "ok": False, "err": "nope"}, "err"),
     ("ack", {"id": "bad id with spaces", "ok": True}, "id"),
@@ -142,6 +148,19 @@ def test_invalid_payloads(t, payload, needle):
     errors = validate(env(t, **payload))
     assert errors, (t, payload)
     assert any(needle in e for e in errors), errors
+
+
+def test_duplicate_keys_are_malformed():
+    with pytest.raises(ProtocolError) as exc:
+        decode(b'{"v":1,"t":"ping","seq":1,"t":"bye"}')
+    assert exc.value.code == "json" and "duplicate" in exc.value.detail
+    with pytest.raises(ProtocolError):
+        decode(b'{"v":1,"t":"state","seq":1,"rate":"calm","ship":{"hull":0.5,"hull":0.9,"shield":1,"mode":"free"}}')
+
+
+def test_rate_tiers_include_paused():
+    assert "paused" in protocol.RATE_TIERS
+    assert validate({"v": 1, "t": "state", "seq": 1, "rate": "paused"}) == []
 
 
 def test_unknown_fields_ok_outside_strict_commands():

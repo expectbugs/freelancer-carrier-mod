@@ -125,7 +125,7 @@ The experiment (the reviewer's script, then our parametrized test over four host
 
 #### B-3 (surprise, not a bug): Whisper CPU `int8` fallback is ~8–9 s for a 2 s clip
 
-R6 guessed 1–2 s. Measured 7.8–9.4 s (`20261018T044900Z-voice-smoke-cpu`). Hypotheses:
+R6 guessed 1–2 s. Measured 7.8–9.4 s (`20261018T044113Z-voice-smoke-cpu`). Hypotheses:
 1. The encoder always processes a padded 30 s window, and large-v3's 32-layer encoder dominates on CPU.
 2. Too few threads. **Disproven:** `cpu_threads` 0 / 8 / 16 gave 7849 / 8610 / 7890 ms.
 3. CPU contention from game lanes running at the same time.
@@ -148,19 +148,60 @@ Measured for the 5-word phrase in voice `am_michael` while game lanes were runni
 | Run | Result |
 |---|---|
 | `20261018T044011Z-voice-smoke` | pass; transcript "Save nanobots for the cruiser."; stt_ms 117 (warm median of 5), first 649; Whisper load 2.8 s; tts_first_audio_ms 390 (warm), cold 465; Kokoro load 0.9 s; cuda/float16; this PID held 2336 MiB (nvidia-smi compute-apps); VRAM delta 2341 MiB |
-| `20261018T0445Z-voice-smoke-netns` | pass inside `unshare -rn` (only `lo`, down): offline proven; stt_ms 124 |
-| `20261018T044700Z-voice-smoke-hfcache-netns` | pass, model resolved by name from the HF cache, offline; stt_ms 132 |
-| `20261018T044900Z-voice-smoke-cpu` | pass on cpu/int8; stt_ms 9351 (B-3) |
-| `20261018T050000Z-sidecar-selftest` | `SELFTEST ok port=29170 … loopback_only=True … shutdown_bye=shutdown port_closed_after=True` |
-| `20261018T050200Z-sidecar-ss` | `ss -ltnp`: `127.0.0.1:29170` only; no IPv6 listener; SIGTERM exit 0; no listener after |
+| `20261018T044044Z-voice-smoke-netns` | pass inside `unshare -rn` (only `lo`, down): offline proven; stt_ms 124 |
+| `20261018T044055Z-voice-smoke-hfcache-netns` | pass, model resolved by name from the HF cache, offline; stt_ms 132 |
+| `20261018T044113Z-voice-smoke-cpu` | pass on cpu/int8; stt_ms 9351 (B-3) |
+| `20261018T045340Z-sidecar-selftest` | `SELFTEST ok port=29170 … loopback_only=True … shutdown_bye=shutdown port_closed_after=True` |
+| `20261018T045349Z-sidecar-ss` | `ss -ltnp`: `127.0.0.1:29170` only; no IPv6 listener; SIGTERM exit 0; no listener after |
 | flood (scratch script) | 20 000 `ev.hit` + `state` lines pushed back to back: all 20 021 lines processed, 0 invalid; the first `pong` after the burst took 184 ms (backlog), then median 0.06 ms. Planned load is ≤ 50 msg/s. |
-| `20261018T051000Z-…-x20`, `20261018T053000Z-…-x20` | full suite 20× each, 0 failures (TESTING §Layers flakiness rule) |
-| `20261018T060000Z-sidecar-pytest-x20` | after the review fixes: 253 tests × 20 runs, 0 failures |
-| `20261018T061000Z-sidecar-selftest`, `20261018T061100Z-sidecar-ss`, `20261018T061200Z-voice-smoke-netns` | final code: selftest ok on 29170; `127.0.0.1:29170` only, no IPv6, SIGTERM exit 0; offline voice smoke ok (stt_ms 121, tts_first_audio_ms 387, cuda/float16) |
-| `20261018T050300Z-sidecar-mic-discovery` | `mic: resolved index=63 matches=1` (name in the local log only) |
+| `20261018T045701Z-…-x20`, `20261018T050255Z-…-x20` | full suite 20× each, 0 failures (TESTING §Layers flakiness rule) |
+| `20261018T052004Z-sidecar-pytest-x20` | after the review fixes: 253 tests × 20 runs, 0 failures |
+| `20261018T052227Z-sidecar-selftest`, `20261018T052227Z-sidecar-ss`, `20261018T052228Z-voice-smoke-netns` | final code: selftest ok on 29170; `127.0.0.1:29170` only, no IPv6, SIGTERM exit 0; offline voice smoke ok (stt_ms 121, tts_first_audio_ms 387, cuda/float16) |
+| `20261018T045357Z-sidecar-mic-discovery` | `mic: resolved index=63 matches=1` (name in the local log only) |
 
 ### Open items for later packages
 
 - W1-SIDECAR: verify `PULSE_SOURCE` + PortAudio `pulse` device actually selects the resolved source (capture.py comment); wire WhisperEngine/KokoroEngine into the live profile; the speech queue; the grammar.
 - W2-REFLEX: ipc.md §11 is the DLL contract. Test against `tools/fakegame.py` inverted, or run the real sidecar with `--profile test`.
 - Harness: run sidecar tests with `$FLMOD_SIDECAR_VENV/bin/pytest -q sidecar/tests`. Under the shared `$FLMOD_VENV` (no numpy/sounddevice/kokoro) the audio-library tests skip with a reason and the rest pass.
+
+## RESUME POINT (review round 1, fix round 1, paused for the GPU-reset reboot, 2026-10-18)
+
+Branch `wp/P0-SIDECAR`. The last commit holds the fix-round-1 work in progress. `pytest -q sidecar/tests`: 262 passed at the checkpoint. The review is `state/reports/P0-SIDECAR-r1.md`; the orchestrator's choices are in the fix-round message (summarised under each item below).
+
+### Review r1 findings: status
+
+| Finding | Status |
+|---|---|
+| **MAJOR: stopped-tick lifecycle** | **Spec done:** ipc.md §4.7 (worker owns handshake and heartbeat; `ev.pause{on}`; one `state` per edge with `rate:"paused"`; queued commands with deferred acks; late acks; ptt cancel) and §11 MUSTs. **Code done:** `server.py` per-process ids, `Pending` with `late`, `on_late`, `Session.reconciled`, `set_paused()` suspending ack timers; `protocol.py` `ev.pause.on`, `ptt.reason`, `rate:"paused"`, `ev.menu`; `pipeline.py` ptt reason → `mic.cancel()`. **Remaining:** dedicated tests (see next steps 1–3). |
+| MINOR abort on send timeout | Code done (`send()` aborts and sets `send_timeout`; `close()` arms a 2 s flush timer and then aborts; `_cleanup` aborts if `wait_closed` times out). Test remaining (step 4). |
+| MINOR command ids per process + DLL drops unapplied | Code done (`_COMMAND_IDS`); spec §3, §4.5. Test remaining (step 5). |
+| MINOR play port 29170 | Code done: `profiles.check_port` (test profile refuses 29170 unless `--allow-play-port` or `FLCOPILOT_ALLOW_PLAY_PORT=1`); `--selftest` uses port 0 unless `--port`; fakegame needs `--port` or `FLCOPILOT_PORT` and refuses 29170 unless `--allow-play-port`; `FakeGame(port)` has no default. Remaining: README example (`--port 29170` → `29171`) and tests (step 6). |
+| MINOR async brain + §13 sandbox | Code done: the pipeline calls `brain.respond` via `asyncio.to_thread`; `brain.py` `BRAIN_CWD`, `BRAIN_CLI_FLAGS` (flags checked against `claude --help`), `BRAIN_ENV_ALLOWLIST`, `brain_env()`, `brain_command()`, `check_init_message()`. Tests remaining (step 7). |
+| MINOR capture reset | Done with tests: discard at the cap (deliver if the tail is already pending), `cancel()`, `reset()` (pipeline resets on session start and cancels on end); `tests/test_capture.py` new cap/cancel/reset tests pass. |
+| MINOR `--require-cuda` | Code done (`voice_smoke.py`: no CPU fallback with `--require-cuda`; results `ok`, `ok-cpu-fallback`, `fail`). Remaining: mocked unit test (step 8); real run after the reboot (step 10). |
+| MINOR critical_hull cap | Spec done (§5, §9: clamp to [floor, min(bots_hull_below, 0.95)], floor wins, re-clamped when either changes). Remaining: fakegame `apply_policy` clamp and a test (step 9). |
+| MINOR ptt key source of truth | Spec done (deploy writes the DLL INI `ptt_vk` from `ptt_key`; default 110 per D-11.3); `welcome.ptt_vk` sent by the server. Test remaining (step 6). |
+| MINOR spec gaps | Done: duplicate keys invalid (`decode` `object_pairs_hook`, test); `state.target.obj` (test); `ev.menu` and single-player-only rule (§4.8); `hello` once per connection (§4.1). |
+| MINOR evidence hygiene | Done: the 12 hand-stamped run dirs were renamed to their real creation stamps (the tables above use the new names); new runs use `date -u +%Y%m%dT%H%M%SZ` or the tools' own stamps. |
+
+### Exact next steps
+
+1. `tests/test_review_r1.py`: pause suspends ack timeouts (ack_timeout 0.2 s, `ev.pause{on:true}`, wait 0.5 s, future still pending, `stats.ack_timeouts == 0`; resume, ack, future resolves). Also: pings still answered during the pause (heartbeat 0.05 s).
+2. Late ack: no ack within the timeout → future is `None`, then the ack arrives → `session.reconciled`, `stats.late_acks == 1`, `on_late` called, no "unknown id". Session end resolves the pending ones to `None`.
+3. PTT cancel: `ptt{down:false, reason:"focus_lost"}` → no `policy.set` (`expect_silence`), `pipeline.cancelled == 1`, and the next normal press works. Add `{"ptt": "cancel", "reason": …}` to the fakegame directives (`DIRECTIVES["ptt"]` gets `"reason"`; `FakeGame.ptt()` gets an optional reason).
+4. Send timeout: a raw client with a small `SO_RCVBUF` that never reads; monkeypatch `server.SEND_TIMEOUT_S = 0.2`; loop `send_command("say", text=500 chars)` until `ConnectionError` → `close_reason == "send_timeout"`, `stats.send_timeouts == 1`, the session finishes, no ESTABLISHED socket left on the port (`/proc/net/tcp` state 01), and `server.stop()` returns quickly.
+5. Ids: two sessions in a row never reuse an id; a stale ack id from session A does not resolve a command of session B.
+6. Ports: `check_port` unit tests; `run.sh --profile test` with no port → exit 2; `--selftest` prints a port ≠ 29170; fakegame CLI without `--port` → exit 2, with `--port 29170` → exit 2. `welcome.ptt_vk == 110` in the handshake test. Fix the README fakegame example to 29171 and mention `--allow-play-port`.
+7. Brain: a slow `FakeBrain` subclass (sleeping 0.6 s) does not delay a ping/pong (< 0.1 s); `brain_env` drops `CLAUDECODE`, keeps the allowlist, adds `CLAUDE_CODE_DISABLE_AUTO_MEMORY`; `brain_command` contains every §13 flag; `check_init_message` flags tools and MCP servers.
+8. `voice_smoke` mocked: patch `kokoro_onnx.Kokoro`, `faster_whisper.WhisperModel` (raise on cuda) and `subprocess.run` (no nvidia-smi); `--require-cuda` → exit 1 with WhisperModel called once (no CPU attempt); without it → `ok-cpu-fallback`, exit 0.
+9. fakegame `apply_policy`: re-clamp `critical_hull` to [0.25, min(bots_hull_below, 0.95)] with the floor winning, plus a test.
+10. After the reboot (GPU healthy): rerun `sidecar/run.sh --tool voice_smoke --require-cuda` and the `unshare -rn` variant; run the suite 20×; `check_public --tree` and `--commits main..wp/P0-SIDECAR`; update this file and README; commit; send the fix report (per finding, tests, evidence paths, SHA).
+
+### Outside the repo (all survive a reboot; nothing runs in the background)
+
+- `$FLMOD_SIDECAR_VENV` = `/home/user/freelancer/carrier-mod/local/sidecar-venv` (on disk; rebuild with `sidecar/setup_venv.sh` if ever lost).
+- `$FLMOD_MODELS/kokoro/{kokoro-v1.0.onnx,voices-v1.0.bin}` and `$FLMOD_MODELS/whisper/faster-whisper-large-v3-turbo/` (on disk; `setup_venv.sh --models` recreates them).
+- Run dirs under `$FLMOD_TESTRUNS` (on disk).
+- Scratch patch scripts under the session scratchpad in `/tmp` may vanish on reboot; nothing depends on them.
+- No sidecar servers or background jobs are running at the checkpoint.

@@ -40,6 +40,13 @@ class Mic:
     async def ptt_up(self):
         return None
 
+    def cancel(self) -> None:
+        """Discard the utterance in progress (ptt{down:false, reason}: polling stopped)."""
+
+    def reset(self) -> None:
+        """Forget all recording state (new session)."""
+        self.cancel()
+
 
 class NullMic(Mic):
     """No microphone: every utterance is empty."""
@@ -95,6 +102,7 @@ class PttCapture(Mic):
         self._stream = None
         self.down_at: float | None = None
         self.overflows = 0
+        self.discarded = 0
 
     # ---- stream ------------------------------------------------------------------------
     def open(self) -> None:
@@ -148,9 +156,19 @@ class PttCapture(Mic):
         n = len(block)
         with self._lock:
             if self._recording:
-                if self._rec_len < self.max_samples:
-                    self._chunks.append(block)
-                    self._rec_len += n
+                if self._rec_len >= self.max_samples:
+                    if self._tail_left is not None:
+                        self._finalize_locked()  # released already: deliver what we have
+                    else:
+                        # Held past the cap: the release was lost, or it is not speech. Discard,
+                        # so the next press starts clean instead of transcribing a stale clip.
+                        self._take_locked()
+                        self.discarded += 1
+                        log.warning("utterance exceeded the cap; discarded",
+                                    extra={"kv": {"cap_s": self.max_samples / self.sample_rate}})
+                    return
+                self._chunks.append(block)
+                self._rec_len += n
                 if self._tail_left is not None:
                     self._tail_left -= n
                     if self._tail_left <= 0:
@@ -206,6 +224,23 @@ class PttCapture(Mic):
             log.warning("capture tail timed out; using partial clip")
             return clip
         return await fut  # finalized just now by the callback thread; the result is in flight
+
+    def cancel(self) -> None:
+        with self._lock:
+            if not self._recording and self._fut is None:
+                return
+            self._take_locked()
+            self.discarded += 1
+            if self._fut is not None:
+                loop, fut = self._fut
+                self._fut = None
+                loop.call_soon_threadsafe(_set_result, fut, None)
+
+    def reset(self) -> None:
+        self.cancel()
+        with self._lock:
+            self._ring.clear()
+            self._ring_len = 0
 
     def _take_locked(self):
         import numpy as np

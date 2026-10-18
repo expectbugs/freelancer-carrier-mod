@@ -6,9 +6,11 @@ script, asserts on the sidecar's replies and acks its commands. It is stdlib-onl
 not import ``flcopilot``, so it is an independent second implementation of the protocol.
 
 Usage:
-    fakegame.py [--port N] [--no-hello] [--timeout S] [-v] script.ndjson [script2.ndjson ...]
+    fakegame.py --port N [--no-hello] [--timeout S] [-v] script.ndjson [script2.ndjson ...]
 
-``--port`` defaults to $FLCOPILOT_PORT, then 29170. Exit code 0 = every script passed.
+``--port`` is required (or $FLCOPILOT_PORT). The play port 29170 is refused unless
+``--allow-play-port``: a fake hello there would replace Adam's real game session. Exit code 0 =
+every script passed.
 
 Script format: one JSON object per line. Blank lines and lines starting with ``#`` or ``//``
 are ignored. Directives:
@@ -141,7 +143,7 @@ _TYPE_CHECKS = {
 class FakeGame:
     """The DLL side of protocol v1, for tests."""
 
-    def __init__(self, port: int = DEFAULT_PORT, host: str = HOST, auto_pong: bool = True,
+    def __init__(self, port: int, host: str = HOST, auto_pong: bool = True,
                  verbose: bool = False, name: str = "fakegame", strict: bool = True, max_stock: int = 99):
         if host != HOST:
             raise ValueError("fakegame only talks to 127.0.0.1")
@@ -514,11 +516,19 @@ async def run_script_file(path: str | os.PathLike, port: int, verbose: bool = Fa
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Fake game client for the copilot sidecar (protocol v1).")
     ap.add_argument("scripts", nargs="+", help="NDJSON script files")
-    ap.add_argument("--port", type=int, default=int(os.environ.get("FLCOPILOT_PORT") or DEFAULT_PORT))
+    env_port = os.environ.get("FLCOPILOT_PORT") or None
+    ap.add_argument("--port", type=int, default=int(env_port) if env_port else None,
+                    help="sidecar port (required unless FLCOPILOT_PORT is set)")
+    ap.add_argument("--allow-play-port", action="store_true", help=f"allow port {DEFAULT_PORT} (the play install)")
     ap.add_argument("--no-hello", action="store_true", help="do not send hello on connect")
     ap.add_argument("--timeout", type=float, default=2.0, help="default expect timeout (s)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
+    if args.port is None:
+        ap.error("--port is required (or set FLCOPILOT_PORT)")
+    if args.port == DEFAULT_PORT and not args.allow_play_port:
+        ap.error(f"refusing the play port {DEFAULT_PORT}: a fake hello would replace the real game's session "
+                 "(use a lane port, or --allow-play-port)")
     failed = 0
     for script in args.scripts:
         try:
