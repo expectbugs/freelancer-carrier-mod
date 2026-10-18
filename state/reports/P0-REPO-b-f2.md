@@ -1,0 +1,7 @@
+Both review fixes are committed on `wp/P0-REPO-b`; HEAD is `4ea9a86`.
+
+- **Metadata cap:** decompressed image metadata is now capped at 5 MB per image in total, and anything over is rejected as a malformed image. Your 80-chunk zTXt image is rejected in about 0.5 s (the whole test runs in 0.52 s); before, it took 490 s and then passed. Two 3 MB chunks together are also rejected; a single small chunk still passes.
+- **`fcm_` names:** under the marker, asset file names starting with `fcm_` no longer count as game assets. A voice-line YAML with `fcm_vo_….wav` files passes and is listed as an escape; the same file with one vanilla-named `.wav` is still rejected, and so is an `fcm_` folder holding a non-`fcm_` file. The rejection message now says to refer to vanilla content by nickname and that only our own `fcm_*` files may be named.
+- **Mutation check:** all 4 mutations of the two changes are caught (per-chunk cap for zTXt and for iTXt, exemption removed, exemption for any path containing `fcm_`).
+- **Checks:** pytest on 3.13 gives 245 passed. `--tree` passes on the branch (161 files) and on the main checkout (314 files). `--commits=main..HEAD` is fully clean (2 commits). Logs are in `$FLMOD_TESTRUNS/20261018T083220Z-p0-repo-b/` (`*-r1fix.log`).
+- **No changes:** backslash paths stay violations even when the file name starts with `fcm_`. The nit (marker inside a YAML block scalar or a Markdown heading) is left as you said.
