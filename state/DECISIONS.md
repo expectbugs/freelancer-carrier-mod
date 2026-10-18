@@ -184,3 +184,11 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
   - `tools/play_prefix_busy.sh` (orchestrator-owned) now normalises each process's `WINEPREFIX` with `realpath -m` before comparing (tested: 4 alternate spellings detected as busy; a dev prefix is not). `toolchain/prefix_clone.sh` gets the same fix (P0-TOOLCHAIN polish N2).
 - **Why:** the EH failure mode is silent until a hook throws in game; a probe in every platform acceptance keeps it caught. Safety checks on the play prefix must match the guards' own path semantics.
 - **Decided by:** orchestrator
+
+## D111 — 2026-10-18 — Devbridge ack key order and a `pending` keep-alive event (before ARCH-0 freezes the protocol)
+- **Context:** P0-HARNESS review r1. (1) The core emits `ack id= ok=0 verb= err=`, while CONVENTIONS §4 says `ack id= ok=1|0 [err="…"]`. (2) The runner's HANG rule ("no log growth for 60 s while a command is pending") kills a healthy game during a legitimate long command (`perf 75` → HANG at 60 s), and S-PERF needs 60 s and 3 min measurements.
+- **Choice:**
+  - Ack lines are `HARNESS … ack id=<id> ok=1|0 [err="<text>"] [verb=<verb>] [<result keys>…]`: `err` immediately after `ok`, always double-quoted with `\"` and `\\` escaped; `verb` and result keys after it. CONVENTIONS stays as written; the harness conforms.
+  - While a command is pending longer than 5 s, the core emits `ev=pending id=<id> verb=<verb> elapsed_s=<n>` every 5 s. The runner's HANG rule counts only log growth, and these lines are log growth; it also honours a per-command budget (`timeout_s`) when one is given. CONVENTIONS §4 lists `ev=pending` as a core event.
+- **Why:** one wire format for every later package; a hang detector that can't tell "busy" from "stuck" would make every long soak and perf measurement flaky.
+- **Decided by:** orchestrator

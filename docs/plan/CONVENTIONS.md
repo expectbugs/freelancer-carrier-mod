@@ -80,6 +80,8 @@ ARCH-1/2/3 may refine later ones; ARCH-0 must create every file, even as a skele
   - `HARNESS t=<game s> wall=<unix ms> …`
   - acks: `HARNESS ack id=<id> ok=1|0 [err="…"]`
   - events: **`ev=<name>`** (never `evt=`)
+  - ack key order (D111): `ack id=<id> ok=1|0 [err="<text>"] [verb=<verb>] [<result keys>…]`; `err` is always double-quoted, with `\"` and `\\` escaped
+  - keep-alive (D111): while a command is pending longer than 5 s, the core emits `ev=pending id=<id> verb=<verb> elapsed_s=<n>` every 5 s
 
 **Verbs.** Owners implement them; ARCH packages freeze the arguments and outputs.
 
