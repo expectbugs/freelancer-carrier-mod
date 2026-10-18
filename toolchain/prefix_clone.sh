@@ -13,13 +13,17 @@ FLMOD_DEFAULT_CLONE_SOURCE=prefix-dev-base-B
 
 # flmod_prefix_in_use <prefix>: 0 (and prints the processes) if any process has its cwd inside <prefix> or
 # WINEPREFIX=<prefix>; 1 if idle. Same test as tools/play_prefix_busy.sh, for any prefix. Read-only.
+# Both sides are normalised with `realpath -m`, like the wine guards (D110), so //, /./, x/.. and trailing-slash
+# spellings of WINEPREFIX (or of <prefix>) can't hide a user. /proc/<pid>/cwd is already canonical.
 flmod_prefix_in_use() {
-  local P=${1%/} d pid cwd envp busy=1
+  local P d pid cwd envp busy=1
+  P=$(realpath -m -- "$1")
   for d in /proc/[0-9]*; do
     pid=${d#/proc/}
     cwd=$(readlink "$d/cwd" 2>/dev/null) || continue
     envp=$(tr '\0' '\n' <"$d/environ" 2>/dev/null | grep -m1 '^WINEPREFIX=' | cut -d= -f2-)
-    case "$cwd/" in "$P"/*) ;; *) case "$envp" in "$P" | "$P/") ;; *) continue ;; esac ;; esac
+    [[ -n $envp ]] && envp=$(realpath -m -- "$envp" 2>/dev/null)
+    case "$cwd/" in "$P"/*) ;; *) [[ -n $envp && $envp == "$P" ]] || continue ;; esac
     echo "in use: pid $pid $(tr '\0' ' ' <"$d/cmdline" 2>/dev/null | cut -c1-120)"
     busy=0
   done
@@ -39,13 +43,18 @@ flmod_clone_source_path() {
 }
 
 # flmod_check_clone_source <from>: validates a --from value. On success prints the source path; on failure prints
-# the reason to stderr and returns 2 (bad value), 3 (in use) or 77 (does not exist).
+# the reason to stderr and returns 2 (bad value), 3 (in use) or 77 (does not exist, or a baseline without
+# BASELINE.json, i.e. not finished by harness/baseline.sh; lane.sh applies the same rule).
 flmod_check_clone_source() {
   local from=$1 src
   src=$(flmod_clone_source_path "$from") || {
     echo "--from must be prefix-dev-base-<X> or 'play' (got '$from')" >&2; return 2; }
   if [[ ! -d $src/drive_c ]]; then
     echo "clone source $src is not a Wine prefix (create it with harness/baseline.sh, or use --from play)" >&2
+    return 77
+  fi
+  if [[ $from != play && ! -f $src/BASELINE.json ]]; then
+    echo "clone source $src has no BASELINE.json (not a finished baseline; run harness/baseline.sh create)" >&2
     return 77
   fi
   if [[ $from == play ]]; then

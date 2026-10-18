@@ -10,7 +10,7 @@
 #   logic_rejects_windows_h_compile  builds tests/host/negative/includes_windows_h.cpp, must FAIL
 #   logic_rejects_forbidden_includes_lint  runs LogicIncludeLint over tests/host/negative/lint_fixture; must FAIL
 #                                    naming every bad include (Windows.h, synchapi.h behind #ifdef, io.h, tchar.h,
-#                                    an unresolved quoted include)
+#                                    an unresolved quoted include, a quoted include into a tests/ dir)
 
 set(_hc_dir "${CMAKE_BINARY_DIR}/generated/logic_header_check")
 set(_hc_sources "")
@@ -56,7 +56,7 @@ set_tests_properties(logic_rejects_windows_h_compile PROPERTIES RESOURCE_LOCK fl
 add_test(NAME logic_rejects_forbidden_includes_lint
   COMMAND "${CMAKE_COMMAND}"
           "-DFLMOD_CMD=${CMAKE_COMMAND};-DFLMOD_LINT_DIR=${PROJECT_SOURCE_DIR}/tests/host/negative/lint_fixture;-DFLMOD_LINT_SRC_ROOT=${PROJECT_SOURCE_DIR}/src;-P;${PROJECT_SOURCE_DIR}/cmake/LogicIncludeLint.cmake"
-          "-DFLMOD_EXPECT=Forbidden includes;bad_header.hpp: #include <Windows.h>;bad_ifdef.hpp: #include <synchapi.h>;bad_crt.hpp: #include <io.h>;bad_crt.hpp: #include <tchar.h>;bad_quoted.hpp: #include .game/fl_adapter.hpp."
+          "-DFLMOD_EXPECT=Forbidden includes;bad_header.hpp: #include <Windows.h>;bad_ifdef.hpp: #include <synchapi.h>;bad_crt.hpp: #include <io.h>;bad_crt.hpp: #include <tchar.h>;bad_quoted.hpp: #include .game/fl_adapter.hpp.;bad_tests_include.hpp: #include .tests/leak_helper.hpp. +.resolves into a tests/ dir"
           -P "${PROJECT_SOURCE_DIR}/tests/host/ExpectFailure.cmake")
 
 add_test(NAME logic_include_lint_passes

@@ -91,6 +91,77 @@ def test_no_clang_cl_units_fails(tmp_path, capsys):
     assert "no clang-cl translation units" in out
 
 
+# ---- review r3 N3: launchers, foreign entries, /EHa neutralised -------------------------------------------------
+
+def test_known_launchers_are_parsed_past(tmp_path, capsys):
+    good = f"-TP {GOOD_COMMON} /EHa"
+    entries = [entry("a.cpp", good, compiler=f"/usr/bin/ccache {CL}"),
+               entry("b.cpp", good, compiler=f"/usr/bin/sccache {CL}")]
+    rc, out = run(tmp_path, entries, capsys)
+    assert rc == 0, out
+    assert "2 clang-cl TUs" in out
+
+
+def test_launcher_does_not_hide_missing_flags(tmp_path, capsys):
+    entries = [entry("good.cpp", f"-TP {GOOD_COMMON} /EHa"),
+               entry("bad.cpp", "-TP -c", compiler=f"/usr/bin/ccache {CL}")]
+    rc, out = run(tmp_path, entries, capsys)
+    assert rc == 1
+    assert "bad.cpp: missing /clang:-mstackrealign" in out
+    assert "bad.cpp: last /EH flag is absent" in out
+
+
+def test_other_entries_fail_even_next_to_good_ones(tmp_path, capsys):
+    entries = [entry("good.cpp", f"-TP {GOOD_COMMON} /EHa"),
+               entry("x.cpp", f"-TP {GOOD_COMMON} /EHa", compiler=f"/usr/bin/distcc {CL}"),
+               {"directory": "/b", "file": "y.cpp", "command": "/usr/lib/llvm/22/bin/clang++ -c y.cpp"},
+               {"directory": "/b", "file": "z.cpp", "command": "/usr/bin/ccache /usr/bin/g++ -c z.cpp"}]
+    rc, out = run(tmp_path, entries, capsys)
+    assert rc == 1
+    assert "x.cpp: not a clang-cl compile (command starts with 'distcc')" in out
+    assert "y.cpp: not a clang-cl compile (command starts with 'clang++')" in out
+    assert "z.cpp: not a clang-cl compile (command starts with 'ccache g++')" in out
+    assert "1 clang-cl TUs (1 C++, 0 C), 3 other entries, 3 with problems" in out
+
+
+def test_rc_entry_through_llvm_rc_is_ignored_but_rc_named_cpp_is_not(tmp_path, capsys):
+    rc_entry = {"directory": "/b", "file": "x.rc", "command": "/usr/lib/llvm/22/bin/llvm-rc /fo x.res x.rc"}
+    fake = {"directory": "/b", "file": "x.cpp", "command": "/usr/bin/cmake -E cmake_llvm_rc x.cpp x.res"}
+    rc, out = run(tmp_path, [entry("a.cpp", f"-TP {GOOD_COMMON} /EHa"), rc_entry, fake], capsys)
+    assert rc == 1
+    assert "x.rc" not in out
+    assert "x.cpp: not a clang-cl compile" in out
+
+
+def test_clang_fno_async_exceptions_fails(tmp_path, capsys):
+    rc, out = run(tmp_path, [entry("a.cpp", f"-TP {GOOD_COMMON} /EHa /clang:-fno-async-exceptions")], capsys)
+    assert rc == 1
+    assert "a.cpp: /EHa is neutralised by -fno-async-exceptions" in out
+
+
+def test_xclang_fno_async_exceptions_fails(tmp_path, capsys):
+    rc, out = run(tmp_path, [entry("a.cpp", f"-TP {GOOD_COMMON} /EHa -Xclang -fno-async-exceptions")], capsys)
+    assert rc == 1
+    assert "a.cpp: /EHa is neutralised by -fno-async-exceptions" in out
+
+
+def test_fno_exceptions_spellings_fail(tmp_path, capsys):
+    entries = [entry("a.cpp", f"-TP {GOOD_COMMON} /EHa -clang:-fno-exceptions"),
+               entry("b.cpp", f"-TP {GOOD_COMMON} /EHa -Xclang -fno-cxx-exceptions")]
+    rc, out = run(tmp_path, entries, capsys)
+    assert rc == 1
+    assert "a.cpp: /EHa is neutralised by -fno-exceptions" in out
+    assert "b.cpp: /EHa is neutralised by -fno-cxx-exceptions" in out
+
+
+def test_later_ehs_minus_and_eha_minus_fail(tmp_path, capsys):
+    entries = [entry("a.cpp", f"-TP {GOOD_COMMON} /EHa /EHs-"), entry("b.cpp", f"-TP {GOOD_COMMON} /EHa /EHa-")]
+    rc, out = run(tmp_path, entries, capsys)
+    assert rc == 1
+    assert "a.cpp: last /EH flag is -EHs-, want /EHa" in out
+    assert "b.cpp: last /EH flag is -EHa-, want /EHa" in out
+
+
 def test_arguments_form_is_supported(tmp_path, capsys):
     e = {"directory": "/b", "file": "a.cpp",
          "arguments": ["/usr/lib/llvm/22/bin/clang-cl", "-TP", "-MD", "-D_ITERATOR_DEBUG_LEVEL=0",

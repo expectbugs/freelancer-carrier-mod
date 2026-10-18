@@ -6,8 +6,9 @@
 #   <...>  C++23 standard library headers, the C compatibility headers (<cstdio>, <stdio.h>, ...),
 #          and <nlohmann/...> (the project's JSON library)
 #   "..."  a file that exists relative to the including file or to FLMOD_LINT_SRC_ROOT, and lies under
-#          src/logic/ or src/contracts/
-# Files under any tests/ directory are not linted (host-only doctest code; see cmake/LogicLintFiles.cmake).
+#          src/logic/ or src/contracts/, but not inside a tests/ dir there
+# Files under any tests/ directory are not linted (host-only doctest code; see cmake/LogicLintFiles.cmake), so a
+# linted file may not include one: that would pull unlinted code (e.g. <windows.h>) into the `logic` library.
 # The host header check (tests/host/LogicHeaderCheck.cmake) catches the same class of problem by compilation;
 # this lint also runs in win32 builds, where <windows.h> would otherwise compile fine.
 
@@ -59,20 +60,30 @@ foreach(_f IN LISTS _files)
         endif()
       endforeach()
       set(_ok FALSE)
+      set(_into_tests FALSE)
       if(_resolved)
         get_filename_component(_src_real "${FLMOD_LINT_SRC_ROOT}" REALPATH)
         get_filename_component(_lint_real "${FLMOD_LINT_DIR}" REALPATH)
         foreach(_allowed IN ITEMS "${_src_real}/logic" "${_src_real}/contracts" "${_lint_real}")
           cmake_path(IS_PREFIX _allowed "${_resolved}" NORMALIZE _is_under)
           if(_is_under)
-            set(_ok TRUE)
+            # tests/ dirs are not linted (LogicLintFiles.cmake), so engine-free code must not reach into them:
+            # a header there may include anything (review r3 N1).
+            file(RELATIVE_PATH _in_root "${_allowed}" "${_resolved}")
+            if(_in_root MATCHES "(^|/)tests/")
+              set(_into_tests TRUE)
+            else()
+              set(_ok TRUE)
+            endif()
           endif()
         endforeach()
       endif()
-      if(_ok)
+      if(_ok AND NOT _into_tests)
         continue()
       endif()
-      if(_resolved)
+      if(_into_tests)
+        string(APPEND _violations "  ${_rel}: ${_line}   (resolves into a tests/ dir, which is not linted)\n")
+      elseif(_resolved)
         string(APPEND _violations "  ${_rel}: ${_line}   (resolves outside src/logic and src/contracts)\n")
       else()
         string(APPEND _violations "  ${_rel}: ${_line}   (not found next to the file or under ${FLMOD_LINT_SRC_ROOT})\n")

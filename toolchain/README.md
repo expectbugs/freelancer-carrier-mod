@@ -64,7 +64,11 @@ Wine's builtin vcruntime140; `/EHa` is what lets `__try/__except` catch a fault 
 the coding rules that no flag fixes: `ABI.md` §6 (hooks: the template in §6.7). CI stage 10 enforces the flags
 statically: `toolchain/check_flags.py` reads each win32 `compile_commands.json` and fails unless every clang-cl TU
 has `/clang:-mstackrealign` (not undone by a later `-mno-stackrealign`), `/MD` and `-D_ITERATOR_DEBUG_LEVEL=0`, and
-every C++ TU has `/EHa` as its last `/EH` flag. The EH probe's `c_*` cases FAIL at run time if the flag goes missing.
+every C++ TU has `/EHa` as its last `/EH` flag with nothing switching it off (`-fno-async-exceptions`,
+`-fno-exceptions`, `-fno-cxx-exceptions` as `/clang:`, `-clang:` or `-Xclang` flags). Entries behind `ccache` or
+`sccache` are checked through the launcher; any entry that is not clang-cl (other launchers, other compilers) is a
+FAIL, and only `.rc` entries for llvm-rc are skipped. The EH probe's `c_*` cases FAIL at run time if the flag goes
+missing.
 
 ## Adding a target (spikes, modules, tools)
 
@@ -173,7 +177,9 @@ the host compile anyway. The file set is defined once, in `cmake/LogicLintFiles.
 the lint's build dependencies and the header check, so fresh and incremental builds see the same files. ctest
 `logic_tests_dir_doctest` proves it: on a scratch copy of the tree it adds a doctest file and a doctest-including
 helper header under `src/logic/zz_fixture/tests/`, then builds incrementally and from scratch, runs the test case in
-`host_tests`, and runs the lint and header-check tests.
+`host_tests`, and runs the lint and header-check tests. The other direction is closed: a linted (non-tests) file may
+not `#include "…"` a file inside a `tests/` dir, since that would pull unlinted code (say `<windows.h>`) into the
+win32 `logic` library (fixture `bad_tests_include.hpp` → `tests/leak_helper.hpp`).
 
 ctest also runs negative probes that must fail **with the expected message** (`tests/host/ExpectFailure.cmake`):
 `logic_rejects_windows_h_compile` ("'windows.h' file not found") and `logic_rejects_forbidden_includes_lint`
@@ -223,8 +229,10 @@ maps them there); the game's `Common.dll` etc.; FLUF.dll. Tests (the delay-impor
 Both scripts work on a throwaway reflink clone named `/home/user/freelancer/prefix-dev-<something>` (never
 `prefix-dev-base*`; use a unique name for concurrent runs) of a **source** prefix chosen with `--from`:
 `prefix-dev-base-B` (default: P0-HARNESS's Track B baseline, HDE intact), `prefix-dev-base-A`, or `play` (the play
-prefix, only while `tools/play_prefix_busy.sh` says it is idle). The source is only read, and is refused while any
-process has its cwd in it or `WINEPREFIX` pointing at it (`toolchain/prefix_clone.sh`). Every argument is validated
+prefix, only while `tools/play_prefix_busy.sh` says it is idle). The source is only read. It is refused while any
+process has its cwd in it or `WINEPREFIX` pointing at it (both compared after `realpath -m`, like the wine guards,
+so `//`, `/./` and `x/..` spellings count; D110), and a baseline without `BASELINE.json` (unfinished, as
+`harness/lane.sh` also checks) is refused too (`toolchain/prefix_clone.sh`). Every argument is validated
 before a run dir or clone is created. Afterwards they `wineserver -k` that clone only and delete it.
 
 - `toolchain/load_proof.sh <win32-trackB build dir> [--clone <name>] [--from <src>] [--keep] [--crt builtin|native|both]`:

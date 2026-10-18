@@ -316,11 +316,26 @@ Review: `state/reports/P0-TOOLCHAIN-r2.md` (reviewer evidence `$FLMOD_TESTRUNS/2
   game dir reports the engine case as SKIP (`skip_paths/`).
 - **F7** README "The src/game rule" (module glob must exclude `(^|/)(tests|scenarios)/`).
 
-## RESUME POINT (2026-10-18, review r2 fix round 2: COMPLETE)
+## RESUME POINT (2026-10-18, review r3 PASS + polish round on N1-N3: COMPLETE)
 
 Branch `wp/P0-TOOLCHAIN`. Reviews: `state/reports/P0-TOOLCHAIN-r1.md` (all findings DONE; the per-finding table is in
-this file at commit `0bceb22`) and `state/reports/P0-TOOLCHAIN-r2.md` (all findings DONE, "Review r2 fixes" above).
-Nothing is pending. If a later round reopens the package, start from that review's findings.
+this file at commit `0bceb22`), `state/reports/P0-TOOLCHAIN-r2.md` (all findings DONE, "Review r2 fixes" above) and
+`state/reports/P0-TOOLCHAIN-r3.md` (PASS; its three new MINORs are done, below). Nothing is pending; the merge waits
+for P0-REPO. D110 adopted the ehprobe proposal.
+
+### Review r3 polish (N1-N3)
+
+Evidence dir: `$FLMOD_TESTRUNS/20261018T0800Z-toolchain-r3-polish/`.
+
+| Finding | Change | Test / evidence | State |
+|---|---|---|---|
+| N1 quoted include from linted code into a tests/ dir | `cmake/LogicIncludeLint.cmake`: a quoted include that resolves inside a `tests/` dir (relative to the allowed root) is a violation | fixture `tests/host/negative/lint_fixture/bad_tests_include.hpp` → `tests/leak_helper.hpp` added to ctest `logic_rejects_forbidden_includes_lint`; the reviewer's loophole in the real tree now fails host and trackB, passes after removal (`n1_loophole.txt`) | DONE |
+| N2 in-use check on raw strings; baseline consistency | `toolchain/prefix_clone.sh`: `realpath -m` on both sides (D110); a `prefix-dev-base-*` source needs `BASELINE.json` | `toolchain/tests/test_prefix_clone.py` (20 cases: `//`, `/./`, `x/..`, trailing `/`, `pfx2/../pfx`, odd spellings of the argument, cwd inside, sibling prefix not counted, BASELINE.json missing/present, baseline in use, bad `--from`); the previous version fails 9 of them (`n2_negative_control_old_prefix_clone.txt`); real baselines accepted (`n2_real_baselines.txt`); 23 refusals unchanged (`refusals.txt`) | DONE |
+| N3 check_flags launchers and EH neutralisation | `toolchain/check_flags.py`: parses past ccache/sccache, FAILs any other non-clang-cl entry (only `.rc` entries for llvm-rc are skipped), FAILs `-fno-async-exceptions`/`-fno-exceptions`/`-fno-cxx-exceptions` in any spelling; later `/EHsc`, `/EHs-`, `/EHa-` already FAIL (last /EH must be /EHa) | 8 new pytest cases (19 in the file) | DONE |
+
+Re-runs: P0-REPO `ci.sh` (32ab66a) `--full --only public,build,host-tests,import-check` from an empty `build/`: PASS x4
+(`$FLMOD_TESTRUNS/20261018T074640Z-ci/`; ctest host 6/6, host-asan 6/6; check_flags 36/37 TUs, 0 other entries);
+pytest `toolchain/tests` 55/55 (`pytest.txt`). No Wine run: the probe is unchanged.
 
 ### Review r2 findings
 
