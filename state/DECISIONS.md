@@ -176,3 +176,11 @@ Decided by is one of Adam, orchestrator, or a package ID. Every sudo command is 
 - **Choice:** carry them. (1) belongs to P0-TRACK-A, whose spike scope is exactly "make Track A boot and load a save" (§4 items 1–2); its brief includes NOTES N7 as the starting point. (2) becomes an acceptance item for W1-HARNESS (fixture owner from Wave 1) once W1-SPAWN's `target` verb lands; until then the post-campaign fixture is marked "loads, no story script; gate/bar UNVERIFIED". The reviewer judges everything else on its merits.
 - **Why:** both items are genuinely outside the package's owned paths; holding HARNESS would stall the whole bake-off.
 - **Decided by:** orchestrator
+
+## D110 — 2026-10-18 — EH probe as a standing acceptance check; play_prefix_busy normalises WINEPREFIX
+- **Context:** P0-TOOLCHAIN f2/r3. Wine's builtin vcruntime140 kills the process on one C++ EH pattern unless `-mstackrealign` is set; the probe (`toolchain/ehprobe.sh`) is the only runtime proof, and CI can't run Wine. The r3 reviewer also found that prefix-in-use checks compared raw `WINEPREFIX` strings, so `//`, `/./` and `x/..` spellings hid a user.
+- **Choice:**
+  - `toolchain/ehprobe.sh --crt both` is part of the acceptance of P0-TRACK-A, P0-TRACK-B and W1-PLATFORM, and is re-run by any package or reviewer whose change touches `toolchain/`, `cmake/` or compile/link flags. Stage 10's static `check_flags.py` is the CI-side guard.
+  - `tools/play_prefix_busy.sh` (orchestrator-owned) now normalises each process's `WINEPREFIX` with `realpath -m` before comparing (tested: 4 alternate spellings detected as busy; a dev prefix is not). `toolchain/prefix_clone.sh` gets the same fix (P0-TOOLCHAIN polish N2).
+- **Why:** the EH failure mode is silent until a hook throws in game; a probe in every platform acceptance keeps it caught. Safety checks on the play prefix must match the guards' own path semantics.
+- **Decided by:** orchestrator
