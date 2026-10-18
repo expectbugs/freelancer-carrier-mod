@@ -14,7 +14,8 @@ BUILD_STATUS: IN_PROGRESS
 2. P0 foundation agents RUNNING (see Agents running). As each reports: save report to `state/reports/<ID>-a1.md`, spawn reviewer, fix loop, merge, `harness/ci.sh`, push (after P0-REPO merged and checker passes on full history).
 3. After P0-REPO merges: `git push origin main` (first push — run `tools/check_public.py --tree .` first); check the first Actions run.
 4. When P0-TOOLCHAIN and P0-HARNESS are merged: brief + spawn P0-TRACK-A and P0-TRACK-B in parallel.
-5. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
+5. **GPU (D103):** each turn, check `timeout 20 vulkaninfo --summary` (exit 0, no vkCreateDevice failure) → if Vulkan is back, tell lanes to switch to DXVK and re-run every DXVK-pending item.
+6. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
 
 ## Package ledger
 Status values: TODO, READY, BRIEFED, RUNNING, REVIEW, FIXING, MERGED, DEGRADED, BLOCKED, SKIPPED.
