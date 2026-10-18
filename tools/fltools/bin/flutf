@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""flutf: dump a UTF tree or list a model's hardpoints.
+
+Wrapper for ``fltools.utf``; puts ``tools/`` on sys.path itself, so it also works under
+``$FLMOD_VENV/bin/python -I tools/fltools/bin/flutf ...`` (``-I`` ignores PYTHONPATH).
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from fltools.utf import main  # noqa: E402
+
+sys.exit(main())

@@ -1,0 +1,97 @@
+# fltools.validate baseline allow-list: findings stock HDE 0.7.1.1 already has.
+# Format: CODE|data-relative file|subject (lower case), one per line; '#' starts a comment.
+# Findings listed here are reported as BASELINE and do not count. Findings on files or
+# nicknames introduced by an overlay never match the baseline.
+# Regenerate: flvalidate --no-baseline --write-baseline <file>, then review and re-annotate.
+# This is our own text (codes + nickname references), not game data.
+
+# B004 (4): Universe [Base] without an [MBase]: the four intro-scene bases (never docked in play).
+B004|universe/universe.ini|intro1_base
+B004|universe/universe.ini|intro2_base
+B004|universe/universe.ini|intro3_base
+B004|universe/universe.ini|intro4_base
+
+# B005 (7): Universe [Base] without a dock solar: intro-scene bases, plus story bases whose solar only exists during missions but are not listed in missioncreatedsolars.ini.
+B005|universe/universe.ini|intro1_base
+B005|universe/universe.ini|intro2_base
+B005|universe/universe.ini|intro3_base
+B005|universe/universe.ini|intro4_base
+B005|universe/universe.ini|li01_05_base
+B005|universe/universe.ini|li01_15_base
+B005|universe/universe.ini|st03b_01_base
+
+# D002 (1): A pilot nickname defined twice in pilots_story.ini (first definition wins).
+D002|missions/pilots_story.ini|msn11_nomad_rheinland_light_fighter
+
+# E006 (62): Patrol/trade-path factions with no [BaseFaction] on any base in that system. Heuristic rule; vanilla paths also end at gates/holes, so these are not crashes in practice.
+E006|universe/systems/br02/br02.ini|br02:fc_g_grp
+E006|universe/systems/br02/br02.ini|br02:fc_lh_grp
+E006|universe/systems/br02/br02.ini|br02:fc_m_grp
+E006|universe/systems/br02/br02.ini|br02:fc_ou_grp
+E006|universe/systems/br03/br03.ini|br03:fc_c_grp
+E006|universe/systems/br04/br04.ini|br04:fc_g_grp
+E006|universe/systems/br04/br04.ini|br04:fc_m_grp
+E006|universe/systems/br04/br04.ini|br04:fc_ou_grp
+E006|universe/systems/br05/br05.ini|br05:fc_c_grp
+E006|universe/systems/br06/br06.ini|br06:fc_ou_grp
+E006|universe/systems/bw01/bw01.ini|bw01:br_n_grp
+E006|universe/systems/bw01/bw01.ini|bw01:fc_c_grp
+E006|universe/systems/bw01/bw01.ini|bw01:fc_rh_grp
+E006|universe/systems/bw03/bw03.ini|bw03:fc_c_grp
+E006|universe/systems/bw04/bw04.ini|bw04:fc_c_grp
+E006|universe/systems/bw06/bw06.ini|bw06:fc_c_grp
+E006|universe/systems/bw06/bw06.ini|bw06:fc_ou_grp
+E006|universe/systems/bw07/bw07.ini|bw07:fc_ou_grp
+E006|universe/systems/bw08/bw08.ini|bw08:gd_bh_grp
+E006|universe/systems/bw08/bw08.ini|bw08:gd_z_grp
+E006|universe/systems/bw09/bw09.ini|bw09:fc_ou_grp
+E006|universe/systems/bw09/bw09.ini|bw09:ku_n_grp
+E006|universe/systems/bw10/bw10.ini|bw10:br_n_grp
+E006|universe/systems/bw10/bw10.ini|bw10:fc_g_grp
+E006|universe/systems/bw10/bw10.ini|bw10:fc_ou_grp
+E006|universe/systems/ew02/ew02.ini|ew02:gd_gm_grp
+E006|universe/systems/ew03/ew03.ini|ew03:fc_rh_grp
+E006|universe/systems/hi01/hi01.ini|hi01:gd_bh_grp
+E006|universe/systems/hi02/hi02.ini|hi02:gd_bh_grp
+E006|universe/systems/iw01/iw01.ini|iw01:fc_lr_grp
+E006|universe/systems/iw01/iw01.ini|iw01:li_n_grp
+E006|universe/systems/iw02/iw02.ini|iw02:gd_bh_grp
+E006|universe/systems/iw02/iw02.ini|iw02:li_n_grp
+E006|universe/systems/iw03/iw03.ini|iw03:li_n_grp
+E006|universe/systems/iw05/iw05.ini|iw05:ku_n_grp
+E006|universe/systems/iw05/iw05.ini|iw05:li_n_grp
+E006|universe/systems/iw06/iw06.ini|iw06:gd_bh_grp
+E006|universe/systems/iw06/iw06.ini|iw06:ku_n_grp
+E006|universe/systems/iw06/iw06.ini|iw06:li_n_grp
+E006|universe/systems/ku01/ku01.ini|ku01:fc_bd_grp
+E006|universe/systems/ku02/ku02.ini|ku02:fc_bd_grp
+E006|universe/systems/ku02/ku02.ini|ku02:fc_fa_grp
+E006|universe/systems/ku02/ku02.ini|ku02:fc_gc_grp
+E006|universe/systems/ku02/ku02.ini|ku02:fc_h_grp
+E006|universe/systems/ku02/ku02.ini|ku02:fc_lh_grp
+E006|universe/systems/ku02/ku02.ini|ku02:fc_lr_grp
+E006|universe/systems/ku03/ku03.ini|ku03:fc_bd_grp
+E006|universe/systems/ku03/ku03.ini|ku03:fc_gc_grp
+E006|universe/systems/ku04/ku04.ini|ku04:fc_bd_grp
+E006|universe/systems/ku04/ku04.ini|ku04:fc_c_grp
+E006|universe/systems/ku04/ku04.ini|ku04:fc_fa_grp
+E006|universe/systems/ku04/ku04.ini|ku04:fc_h_grp
+E006|universe/systems/ku04/ku04.ini|ku04:fc_ou_grp
+E006|universe/systems/li02/li02.ini|li02:fc_lh_grp
+E006|universe/systems/li03/li03.ini|li03:fc_lh_grp
+E006|universe/systems/li03/li03.ini|li03:fc_lr_grp
+E006|universe/systems/rh02/rh02.ini|rh02:fc_b_grp
+E006|universe/systems/rh02/rh02.ini|rh02:fc_j_grp
+E006|universe/systems/rh02/rh02.ini|rh02:fc_rh_grp
+E006|universe/systems/rh02/rh02.ini|rh02:fc_u_grp
+E006|universe/systems/rh04/rh04.ini|rh04:fc_rh_grp
+E006|universe/systems/rh04/rh04.ini|rh04:fc_u_grp
+
+# I002 (4): IDS that resolve to nothing in the DLL their index names.
+I002|characters/newcharacter.ini|ge_fighter:strid_desc
+I002|characters/newcharacter.ini|ge_fighter:strid_name
+I002|universe/systems/li01/li01.ini|li01_trade_lane_ring_141:tradelane_space_name
+I002|universe/systems/li01/li01.ini|li01_trade_lane_ring_146:tradelane_space_name
+
+# N004 (1): An NPCShipArch without a pilot (the faux player used by scripts).
+N004|missions/npcships.ini|fauxplayer
