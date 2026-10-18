@@ -168,6 +168,7 @@ dirty="$(git -C "$repo_root" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 declare -a res_line=()
+declare -a escaped=()  # files the public stage accepted under the authored-data marker (D112)
 n_pass=0; n_skip=0; n_fail=0; n_notrun=0
 
 write_summary() {  # $1 = verdict
@@ -185,6 +186,12 @@ write_summary() {  # $1 = verdict
         if [ ${#res_line[@]} -eq 0 ]; then echo "(none run yet)"; fi
         for l in "${res_line[@]}"; do echo "- $l"; done
         echo
+        if [ ${#escaped[@]} -gt 0 ]; then
+            echo "## Authored-data escapes (public stage; reviewers check each reason)"
+            echo
+            for l in "${escaped[@]}"; do echo "- $l"; done
+            echo
+        fi
         echo "VERDICT: $1 ($n_pass pass, $n_skip skip, $n_fail fail, $n_notrun not run)"
     } > "$summary.tmp" && mv -f "$summary.tmp" "$summary"
 }
@@ -221,6 +228,13 @@ for i in "${!plan_name[@]}"; do
             last="$(grep -E '^check_public: (OK|FAIL)' "$log" | tail -n 1)"
             last="${last#check_public: }"; last="${last#OK: }"; last="${last#FAIL: }"
             last="${last%% (*}"; last="${last%%;*}"
+            while IFS= read -r l; do
+                escaped+=("$l")
+            done < <(sed -n 's/^check_public: AUTHORED-DATA //p' "$log")
+            if [ ${#escaped[@]} -gt 0 ]; then
+                last="$last; ${#escaped[@]} authored-data escape(s), listed in summary.md"
+                for l in "${escaped[@]}"; do echo "CI public: authored-data escape: $l"; done
+            fi
             case $rc in
                 0) echo "CI public: PASS (check_public --tree: $last)" >> "$log" ;;
                 1) echo "CI public: FAIL (check_public --tree: $last; see log)" >> "$log" ;;
