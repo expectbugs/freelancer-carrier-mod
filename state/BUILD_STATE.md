@@ -10,13 +10,11 @@ BUILD_STATUS: IN_PROGRESS
 - **Last update:** 2026-10-17T23:10 (P0 foundation spawned)
 
 ## Next actions
-1. `source tools/env.sh`; confirm the wine guards refuse an unset prefix (`wine --version` must exit 97). Make sure no wine process uses the play prefix (`pgrep -af 'freelancer/prefix/'`), then run `tools/play_prefix_manifest.sh capture` (read-only; proves later that the play install was never touched).
-2. Create the shared Python venv: `python3.13 -m venv /home/user/freelancer/carrier-mod/.venv && .venv/bin/pip install pytest pyyaml jsonschema` (CONVENTIONS §1). Create `/home/user/freelancer/carrier-brain-cwd` (empty dir, CONVENTIONS §13).
-2b. `tools/display-awake.sh start`; send push notification "Freelancer carrier build started" (fallback: append to `state/NOTIFICATIONS.md`).
-3. Set the first line of this file to `BUILD_STATUS: IN_PROGRESS`; commit.
-4. Brief and spawn in parallel: P0-REPO, P0-TOOLCHAIN, P0-HARNESS, P0-DATATOOLS, P0-SIDECAR (BUILD_PLAN §5). P0-REPO creates the public GitHub repo and pushes the existing history.
-5. When P0-TOOLCHAIN and P0-HARNESS are merged: spawn P0-TRACK-A and P0-TRACK-B in parallel.
-6. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
+1. ~~Env guards, manifest, venv, brain cwd, display-awake, IN_PROGRESS~~ (done 2026-10-17T23:08; manifest 8770 entries).
+2. P0 foundation agents RUNNING (see Agents running). As each reports: save report to `state/reports/<ID>-a1.md`, spawn reviewer, fix loop, merge, `harness/ci.sh`, push (after P0-REPO merged and checker passes on full history).
+3. After P0-REPO merges: `git push origin main` (first push — run `tools/check_public.py --tree .` first); check the first Actions run.
+4. When P0-TOOLCHAIN and P0-HARNESS are merged: brief + spawn P0-TRACK-A and P0-TRACK-B in parallel.
+5. Run G0a (`docs/plan/packages/G0a.md`), then the S-* spikes in parallel, then G0b, then ARCH-0, then Wave 1.
 
 ## Package ledger
 Status values: TODO, READY, BRIEFED, RUNNING, REVIEW, FIXING, MERGED, DEGRADED, BLOCKED, SKIPPED.
@@ -87,6 +85,11 @@ W4-ESC-* and FIX-* rows are appended when created.
 ## Agents running
 | Agent name/id | Package | Role (impl/review) | Started | Notes |
 |---|---|---|---|---|
+| af7c7d7da0b0d74b7 | P0-REPO | impl | 2026-10-17T23:11 | attempt 1 |
+| afd32a815c13c9fe1 | P0-TOOLCHAIN | impl | 2026-10-17T23:11 | attempt 1 |
+| a55157d6f12dd6759 | P0-HARNESS | impl | 2026-10-17T23:11 | attempt 1 |
+| a446e0585bf801c32 | P0-DATATOOLS | impl | 2026-10-17T23:11 | attempt 1 |
+| a5795216824605bda | P0-SIDECAR | impl | 2026-10-17T23:11 | attempt 1 |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
