@@ -23,7 +23,7 @@ W4-ESC-* and FIX-* rows are appended when created.
 | ID | Wave | Type | Deps | Status | Attempts | Branch @ SHA | Merged | Notes |
 |---|---|---|---|---|---|---|---|---|
 | P0-REPO | 0 | impl | — | REVIEW | 1 | wp/P0-REPO @ 257ef54 | | |
-| P0-TOOLCHAIN | 0 | impl | — | RUNNING | 1 | | | |
+| P0-TOOLCHAIN | 0 | impl | — | REVIEW | 1 | wp/P0-TOOLCHAIN @ 9d320f3 | | |
 | P0-HARNESS | 0 | impl | — | RUNNING | 1 | | | |
 | P0-DATATOOLS | 0 | impl | — | RUNNING | 1 | | | |
 | P0-SIDECAR | 0 | impl | — | RUNNING | 1 | | | |
@@ -87,7 +87,8 @@ W4-ESC-* and FIX-* rows are appended when created.
 |---|---|---|---|---|
 | af7c7d7da0b0d74b7 | P0-REPO | impl | 2026-10-17T23:11 | attempt 1 reported DONE 00:05; idle, resumable for fixes |
 | a6d079bb31f368f5b | P0-REPO | review r1 | 2026-10-18T00:07 | |
-| afd32a815c13c9fe1 | P0-TOOLCHAIN | impl | 2026-10-17T23:11 | attempt 1 |
+| afd32a815c13c9fe1 | P0-TOOLCHAIN | impl | 2026-10-17T23:11 | attempt 1 reported DONE 00:13; idle, resumable |
+| aa8f1e4667ecb98c8 | P0-TOOLCHAIN | review r1 | 2026-10-18T00:14 | |
 | a55157d6f12dd6759 | P0-HARNESS | impl | 2026-10-17T23:11 | attempt 1 |
 | a446e0585bf801c32 | P0-DATATOOLS | impl | 2026-10-17T23:11 | attempt 1 |
 | a5795216824605bda | P0-SIDECAR | impl | 2026-10-17T23:11 | attempt 1 |
