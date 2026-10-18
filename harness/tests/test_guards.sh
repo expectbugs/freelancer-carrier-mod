@@ -54,7 +54,8 @@ rm -f "$SYM"
 # Success for an existing allowed prefix: wine --version exits before touching the prefix.
 ALLOWED="${1:-}"
 if [ -z "$ALLOWED" ]; then
-  for c in /home/user/freelancer/prefix-lane-[0-9]* /home/user/freelancer/prefix-dev-base-B /home/user/freelancer/prefix-dev-base-A; do
+  # only test lanes 6-8 or the B baseline: pool lanes 1-4 belong to running agents (review b-r1)
+  for c in /home/user/freelancer/prefix-lane-[678] /home/user/freelancer/prefix-dev-base-B; do
     [ -d "$c/drive_c" ] && { ALLOWED="$c"; break; }
   done
 fi
@@ -62,7 +63,7 @@ if [ -n "$ALLOWED" ]; then
   out=$(WINEPREFIX="$ALLOWED" wine --version 2>&1); rc=$?
   if [ $rc -eq 0 ] && echo "$out" | grep -q 'Proton-11.0'; then ok "allowed $ALLOWED: wine --version = $out"; else bad "allowed $ALLOWED: rc=$rc out=$out"; fi
 else
-  echo "SKIP allowed-prefix success case: no existing lane/baseline prefix yet"
+  echo "SKIP allowed-prefix success case: no test lane (6-8) or baseline B prefix"
 fi
 
 # Gap report (informational, not a failure of the guards themselves): wine launchers on PATH that are not guarded.

@@ -19,11 +19,18 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# never wait for (or stall) another agent's input: skip when input.lock is busy (exit 77 = skipped, see test_shell_suites.py)
+# never wait for (or stall) another agent: skip when input.lock is busy or a foreign renderer class runs, and treat
+# an acquire lost to another agent's lock as a skip too (exit 77 = skipped, see test_shell_suites.py; review b-r1)
+ACQ_ERR="$TMP/acq.err"
+source "$H/tests/lib_contention.sh"
 if ! flock -n "$FLMOD_LOCKS/input.lock" true; then echo "SKIP input.lock is held by another agent right now"; exit 77; fi
-out=$("$H/lane.sh" acquire --track B --lane 6 --keep-prefix --input --owner test_input_gate --wait 120 2>/dev/null)
+if foreign_sw; then echo "SKIP a wined3d-sw lane is held by another agent (default-class acquire would wait)"; exit 77; fi
+out=$("$H/lane.sh" acquire --track B --lane 6 --keep-prefix --input --owner test_input_gate --wait 20 2>"$ACQ_ERR")
 TOK=$(sed -n 's/^export LANE_TOKEN=//p' <<<"$out")
-[ -n "$TOK" ] || { echo "FAIL could not acquire lane 6 with --input"; exit 1; }
+if [ -z "$TOK" ]; then
+  contention && { echo "SKIP lane 6 --input lost to another agent's lock: $(tail -1 "$ACQ_ERR")"; exit 77; }
+  echo "FAIL could not acquire lane 6 with --input: $(tail -1 "$ACQ_ERR")"; exit 1
+fi
 LP=$(sed -n "s/^export WINEPREFIX='\(.*\)'$/\1/p" <<<"$out")
 
 cp /usr/bin/sleep "$TMP/Freelancer.exe"
