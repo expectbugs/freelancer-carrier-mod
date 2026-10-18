@@ -78,3 +78,32 @@ KNOWN ISSUES:
 ```
 
 Every claim above is VERIFIED by the listed evidence except where marked UNVERIFIED or "from reading patch.py". Nothing was written to `$FLMOD_LOCAL/gen` or `$FLMOD_LOCKS` (checked), and there are no background processes or prefixes left. NOTES.md has an up-to-date RESUME POINT and the design notes for this round (§7).
+
+---
+## Addendum (D107, 2026-10-18T02:45): `harness.*` unit preservation — HEAD 8eb78e3
+
+D107 is in on `wp/P0-DATATOOLS`, and all checks pass at the new HEAD, **8eb78e3**.
+
+**What changed**
+- **`fltools.patch`:** gen deploy and undeploy now keep any existing `harness.*` unit exactly where it was; they never strip, re-order or rewrite it. Each one stays right after the gen unit it followed, so an unchanged redeploy is byte-exact.
+- **Removal:** only an explicit `unpatch_file(..., ["harness.<x>"])` takes a harness unit out.
+- **Gen can't use the namespace:** a generator producing a `harness.*` id fails at build, and `plan_overlay_patches` also rejects such a unit.
+- **`undeploy`:** it removes only gen's files and regions. It now keeps `carrier-mod.patchstate.json` while harness units are still recorded in it.
+- **`tools/fltools/README.md`:** new section on the `harness.*` namespace: who may use it, what gen guarantees, and that switching `harness/lib/deploy.py` to `harness.dacom` happens after both packages merge (P0-HARNESS / W1-HARNESS work). The NOTES resume point has a D107 row and a design note.
+
+**Tests** (`tests/py/fltools/test_harness_units.py`, synthetic install, no game data needed). Gen and harness units append to the same section, which is the strictest case for order:
+- Gen deploy, then harness unit, then gen redeploy: byte-exact. Then gen undeploy: harness region still there, gen regions gone. Then harness unpatch: file identical to pristine.
+- Harness first, then gen deploy and redeploy (byte-exact), then gen undeploy: back to the harness-only bytes.
+- Harness unpatch leaves gen's regions untouched.
+- A `harness.*` id from gen is refused.
+- The ordering rules are tested directly.
+
+Mutation checks: turning off the preservation fails 3 tests; deleting the state file on undeploy fails 2.
+
+**Results**
+- pytest with game data: 120 passed.
+- pytest without game data: 82 passed, 38 skipped, all for "HDE install not found".
+- CI stage 30: PASS.
+- `check_public --tree`: OK, 147 files.
+
+Evidence is in `/home/user/freelancer/carrier-mod/local/testruns/20261018T071105Z-p0-datatools-d107/`.
