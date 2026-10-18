@@ -15,7 +15,7 @@ BAK="$ST/display-settings.bak"
 PIDF="$ST/display-inhibit.pid"
 mkdir -p "$ST"
 # alive only if the recorded pid is still OUR inhibitor (a stale pid file after a reboot may name an unrelated process)
-inhibitor_alive(){ [ -f "$PIDF" ] && tr '\0' ' ' < "/proc/$(cat "$PIDF")/cmdline" 2>/dev/null | grep -q 'xfce4-screensaver-command --inhibit -n flbuild'; }
+inhibitor_alive(){ [ -f "$PIDF" ] && tr '\0' ' ' 2>/dev/null < "/proc/$(cat "$PIDF")/cmdline" | grep -q 'xfce4-screensaver-command --inhibit -n flbuild'; }
 case "${1:-status}" in
   start)
     if [ ! -f "$BAK" ]; then
