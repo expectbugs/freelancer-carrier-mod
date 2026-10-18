@@ -26,8 +26,8 @@ W4-ESC-* and FIX-* rows are appended when created.
 | P0-REPO | 0 | impl | — | FIXING | 1 | wp/P0-REPO @ 257ef54 | | r1 CHANGES_REQUIRED (4 MAJOR); fix round 1 |
 | P0-TOOLCHAIN | 0 | impl | — | FIXING | 1 | wp/P0-TOOLCHAIN @ 9d320f3 | | r1 CHANGES_REQUIRED (1 MAJOR: EH under Wine); fix round 1 |
 | P0-HARNESS | 0 | impl | — | RUNNING | 1 | | | |
-| P0-DATATOOLS | 0 | impl | — | REVIEW | 1 | wp/P0-DATATOOLS @ 1a99d13 | | r1 running |
-| P0-SIDECAR | 0 | impl | — | REVIEW | 1 | wp/P0-SIDECAR @ cf21a75 | | r1 running |
+| P0-DATATOOLS | 0 | impl | — | FIXING | 1 | wp/P0-DATATOOLS @ 1a99d13 | | r1 CHANGES_REQUIRED (3 MAJOR); fix round 1 |
+| P0-SIDECAR | 0 | impl | — | FIXING | 1 | wp/P0-SIDECAR @ cf21a75 | | r1 CHANGES_REQUIRED (1 MAJOR ipc pause lifecycle); fix round 1 |
 | P0-TRACK-A | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | P0-TRACK-B | 0 | spike | P0-TOOLCHAIN, P0-HARNESS | TODO | 0 | | | |
 | S-BASE | 0 | spike | G0a, P0-DATATOOLS | TODO | 0 | | | |
@@ -92,9 +92,9 @@ W4-ESC-* and FIX-* rows are appended when created.
 | aa8f1e4667ecb98c8 | P0-TOOLCHAIN | review r1 | 2026-10-18T00:14 | done: CHANGES_REQUIRED |
 | a55157d6f12dd6759 | P0-HARNESS | impl | 2026-10-17T23:11 | attempt 1 |
 | a446e0585bf801c32 | P0-DATATOOLS | impl | 2026-10-17T23:11 | attempt 1 reported DONE ~00:23; idle |
-| a3d414faf5f1ca52a | P0-DATATOOLS | review r1 | 2026-10-18T00:25 | |
+| a3d414faf5f1ca52a | P0-DATATOOLS | review r1 | 2026-10-18T00:25 | done: CHANGES_REQUIRED |
 | a5795216824605bda | P0-SIDECAR | impl | 2026-10-17T23:11 | attempt 1 reported DONE ~00:25; idle |
-| a1877e1749d92c531 | P0-SIDECAR | review r1 | 2026-10-18T00:27 | |
+| a1877e1749d92c531 | P0-SIDECAR | review r1 | 2026-10-18T00:27 | done: CHANGES_REQUIRED |
 
 ## Lanes
 | Lane | Prefix | Holder | Since |
