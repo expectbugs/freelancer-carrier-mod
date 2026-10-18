@@ -7,7 +7,7 @@ BUILD_STATUS: IN_PROGRESS
 - **Track (G0a):** undecided
 - **Base plan (S-BASE / G0b):** undecided
 - **Lanes:** created by P0-HARNESS (baselines prefix-dev-base-A/B clean; lane-1/2 disposable; lane-6/7/8 leftovers HARNESS may delete). **GPU healthy since the reboot** (VERIFIED 2026-10-18T01:34: vulkaninfo OK, Recovery Action None; driver 615.71.09, kernel 6.18.48) → `FLMOD_RENDERER=auto` = DXVK. `LANES=2` until P0-HARNESS measures concurrency. GPU-fault watch: agents log to `local/gpu-fault.log` and fall back to wined3d-sw.
-- **Last update:** 2026-10-18T01:45 (session 2: worktrees cleaned, 5 P0 agents re-briefed and running)
+- **Last update:** 2026-10-18T01:57 (P0-REPO fix r1 done → r2 review running)
 
 ## Next actions
 Session 2 (started 2026-10-18T01:34). Resume briefs: `state/briefs/RESUME-2026-10-18.md` (common) + `state/briefs/<ID>-resume.md`. check_public snapshot for siblings: `local/snapshots/check_public.py` (wp/P0-REPO @ 4e02754).
@@ -23,7 +23,7 @@ W4-ESC-* and FIX-* rows are appended when created.
 
 | ID | Wave | Type | Deps | Status | Attempts | Branch @ SHA | Merged | Notes |
 |---|---|---|---|---|---|---|---|---|
-| P0-REPO | 0 | impl | — | FIXING | 1 | wp/P0-REPO @ 4e02754 | | r1 F1–F8, F10–F13 done (183 tests); owes per-finding fix report; history fails --commits → squash-merge (D106); siblings DATATOOLS/HARNESS must move decomp citations out of code (D106); RESUME POINT harness/ci.d/NOTES-P0-REPO.md |
+| P0-REPO | 0 | impl | — | REVIEW (r2) | 1 | wp/P0-REPO @ 32ab66a | | fix r1 DONE (f1 report; 183 tests); r2 reviewer running; squash-merge (D106); F9 blocklist entry added by orchestrator |
 | P0-TOOLCHAIN | 0 | impl | — | FIXING | 1 | wp/P0-TOOLCHAIN @ ad47bb5 | | r1 fix round 1 mostly done: EH (c) fixed by -mstackrealign, (a)/(b) coding rules ABI.md §6, 27-case EH probe; remaining: re-run ci.d 20/50, README, PINS (FLUF URLs, redist pin), final acceptance + fix report; OPEN Q: app-local native MSVC runtime for FLUF (Track A) |
 | P0-HARNESS | 0 | impl | — | RUNNING (a1 continued) | 1 | wp/P0-HARNESS @ a5bafe5 | | report state/reports/P0-HARNESS-a1.md; RESUME POINT at top of harness/NOTES.md; first after reboot: Track A DXVK boot + dacom stricmp crash triage, concurrency, spew allow-lists, vdesk input gate |
 | P0-DATATOOLS | 0 | impl | — | FIXING | 1 | wp/P0-DATATOOLS @ 463eb68 | | r1 fix round 1 ~half done (MAJOR1 done; MAJOR2/3 code done, tests missing; hygiene+validator MINORs not started); RESUME POINT in tools/fltools/NOTES.md |
@@ -88,7 +88,8 @@ Session-1 agents are gone (stopped for the reboot). Session-2 agents (spawned 20
 
 | Agent name/id | Package | Role (impl/review) | Started | Notes |
 |---|---|---|---|---|
-| a98da3ea1147f6e70 | P0-REPO | impl (fix r1 cont.) | 2026-10-18T01:44 | from 4e02754 |
+| a98da3ea1147f6e70 | P0-REPO | impl (fix r1 cont.) | 2026-10-18T01:44 | DONE 01:52 @ 32ab66a (idle; resume via SendMessage for fix r2) |
+| ad0f03e5949648e45 | P0-REPO | review r2 | 2026-10-18T01:57 | |
 | a51e1fa9688258fbd | P0-TOOLCHAIN | impl (fix r1 cont.) | 2026-10-18T01:44 | from ad47bb5 |
 | aa760a6d5172501fc | P0-HARNESS | impl (a1 cont.) | 2026-10-18T01:44 | from a5bafe5 |
 | aeb69a8aaddaa49db | P0-DATATOOLS | impl (fix r1 cont.) | 2026-10-18T01:44 | from 463eb68 |
